@@ -3592,7 +3592,7 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
     }
     /* A side-by-side stereo pair (--vr, oxr.c): the slot into the headset's swapchain, before the window's own submit.
      * The slot is read only here and by the window's blit; it is in the SDR format the headset path copies raw. */
-    if (stereo && xbox_VrActive() && s_slot[k].img && s_slot[k].layout == VK_IMAGE_LAYOUT_GENERAL
+    if (xbox_VrActive() && s_slot[k].img && s_slot[k].layout == VK_IMAGE_LAYOUT_GENERAL
             && s_slot[k].format == VK_FORMAT_B8G8R8A8_UNORM)
         xbox_VrPresent(C, s_slot[k].img, s_slot[k].w, s_slot[k].h, s_slot[k].format, stereo, flip);
     else if (stereo && xbox_VrActive()) {

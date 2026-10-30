@@ -113,6 +113,8 @@ static struct { xbox_vr_pose pose; } s_ring[256];
 static xbox_vr_pose s_latest;
 static volatile unsigned s_pose_seq;            /* a seqlock: odd while s_latest is being written */
 static unsigned s_next_id = 1;
+static int s_menu_set;                          /* the menu screen has its place */
+static float s_menu_pose[7];                    /* its orientation (x y z w) and position */
 
 int xbox_VrPose(xbox_vr_pose *out)
 {
@@ -816,11 +818,15 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     int have_layer = 0, have_pose = 0;
     float k, vwx = 0, vwy = 0, ipd = 0;
     xbox_vr_pose pose;
+    int menu;
+    XrCompositionLayerQuad lq;
 
+    memset(&pose, 0, sizeof pose);
     (void)fmt;
     (void)flip;
-    if (!xbox_VrActive() || !C || !(stereo & NV2A_STEREO_ON) || !w || !h)
+    if (!xbox_VrActive() || !C || !w || !h)
         return;
+    menu = !(stereo & NV2A_STEREO_ON);       /* menus and loading: the whole picture on a screen in front of the player */
     if (!X.session_made && !make_session(C)) {
         fail("no session");
         return;
@@ -832,8 +838,15 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
         fail("no swapchain");
         return;
     }
-    if (w != X.sw || h != X.sh)
+    if (w != X.sw || h != X.sh) {
+        static int said;
+
+        if (said++ < 3)
+            fprintf(stderr, VRLOG "a %ux%u frame, the swapchain is %ux%u: not shown in the headset%s" "
+", w, h, X.sw, X.sh,
+                    menu ? " (a menu frame)" : "");
         return;                              /* the picture's size changed: one swapchain size per run */
+    }
     memset(&wi, 0, sizeof wi);
     wi.type = XR_TYPE_FRAME_WAIT_INFO;
     memset(&fs, 0, sizeof fs);
@@ -888,6 +901,8 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
             np.p[1] = 0.5f * (views[0].pose.position.y + views[1].pose.position.y);
             np.p[2] = 0.5f * (views[0].pose.position.z + views[1].pose.position.z);
             np.ipd = sqrtf(dx * dx + dy * dy + dz * dz);
+            if (np.ipd < 0.03f)
+                np.ipd = 0.063f;                /* the runtime gave both eyes one place: use a typical separation */
             for (e = 0; e < 2; e++) {           /* the wider side of each, over both eyes */
                 t = tanf(-views[e].fov.angleLeft);
                 if (t > np.vwx) np.vwx = t;
@@ -916,13 +931,18 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
         if (pid && s_ring[pid].pose.id == pid) {
             pose = s_ring[pid].pose;            /* what the picture was drawn from */
             have_pose = 1;
+        } else if (!menu && s_latest.id) {
+            pose = s_latest;                    /* the id is gone from the ring: the latest will do */
+            have_pose = 1;
         }
     }
     vwx = pose.vwx;
     vwy = pose.vwy;
     ipd = pose.ipd;
     (void)k;
-    if (fs.shouldRender && have_pose) {
+    if (!menu)
+        s_menu_set = 0;
+    if (fs.shouldRender && (have_pose || menu)) {
         XrSwapchainImageAcquireInfo ai;
         XrSwapchainImageWaitInfo wsi;
         int copied = 0;
@@ -969,6 +989,53 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
             nvk_queue_lock();
             p_xrReleaseSwapchainImage(X.sc, &ri);
             nvk_queue_unlock();
+            if (menu) {
+                if (!s_menu_set) {              /* put the screen 2 m ahead of where the player looks now, and leave it there */
+                    xbox_vr_pose hp;
+                    float fx, fz, n, a;
+
+                    memset(&hp, 0, sizeof hp);
+                    hp.q[3] = 1.0f;
+                    hp.p[1] = 1.2f;
+                    if (s_latest.id)
+                        hp = s_latest;
+                    fx = -2.0f * (hp.q[0] * hp.q[2] + hp.q[3] * hp.q[1]);
+                    fz = -(1.0f - 2.0f * (hp.q[0] * hp.q[0] + hp.q[1] * hp.q[1]));
+                    n = sqrtf(fx * fx + fz * fz);
+                    if (n < 0.1f) {
+                        fx = 0.0f;
+                        fz = -1.0f;
+                    } else {
+                        fx /= n;
+                        fz /= n;
+                    }
+                    a = atan2f(-fx, -fz);
+                    s_menu_pose[0] = 0.0f;
+                    s_menu_pose[1] = sinf(0.5f * a);
+                    s_menu_pose[2] = 0.0f;
+                    s_menu_pose[3] = cosf(0.5f * a);
+                    s_menu_pose[4] = hp.p[0] + 2.0f * fx;
+                    s_menu_pose[5] = hp.p[1];
+                    s_menu_pose[6] = hp.p[2] + 2.0f * fz;
+                    s_menu_set = 1;
+                }
+                memset(&lq, 0, sizeof lq);
+                lq.type = XR_TYPE_COMPOSITION_LAYER_QUAD;
+                lq.space = X.space;
+                lq.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+                lq.subImage.swapchain = X.sc;
+                lq.subImage.imageRect.extent.width = (int32_t)w;
+                lq.subImage.imageRect.extent.height = (int32_t)h;
+                lq.pose.orientation.y = s_menu_pose[1];
+                lq.pose.orientation.w = s_menu_pose[3];
+                lq.pose.position.x = s_menu_pose[4];
+                lq.pose.position.y = s_menu_pose[5];
+                lq.pose.position.z = s_menu_pose[6];
+                lq.size.width = 2.4f;
+                lq.size.height = 2.4f * (float)h / (float)w;
+                layers[0] = (const XrCompositionLayerBaseHeader *)&lq;
+                have_layer = 1;
+            } else {
             memset(&lp, 0, sizeof lp);
             lp.type = XR_TYPE_COMPOSITION_LAYER_PROJECTION;
             lp.space = X.space;
@@ -1000,6 +1067,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
             }
             layers[0] = (const XrCompositionLayerBaseHeader *)&lp;
             have_layer = 1;
+            }
         } else if (XR_SUCCEEDED(r)) {
             XrSwapchainImageReleaseInfo ri;
 
@@ -1021,7 +1089,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     if (XR_FAILED(r))
         fprintf(stderr, VRLOG "xrEndFrame: %s\n", rs(r));
     if (X.frames++ == 0)
-        fprintf(stderr, VRLOG "first stereo frame to the headset (pose %u): eye separation %.3f m, view window %.3f x %.3f "
+        fprintf(stderr, VRLOG "first frame to the headset (pose %u): eye separation %.3f m, view window %.3f x %.3f "
                 "(field of view %.0f x %.0f degrees)%s\n", pose.id, ipd, vwx, vwy, 2.0 * atan((double)vwx) * 57.29578,
                 2.0 * atan((double)vwy) * 57.29578, X.swap ? ", eyes swapped" : "");
 }
