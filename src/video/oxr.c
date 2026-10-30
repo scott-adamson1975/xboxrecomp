@@ -842,8 +842,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
         static int said;
 
         if (said++ < 3)
-            fprintf(stderr, VRLOG "a %ux%u frame, the swapchain is %ux%u: not shown in the headset%s" "
-", w, h, X.sw, X.sh,
+            fprintf(stderr, VRLOG "a %ux%u frame, the swapchain is %ux%u: not shown in the headset%s" "\n", w, h, X.sw, X.sh,
                     menu ? " (a menu frame)" : "");
         return;                              /* the picture's size changed: one swapchain size per run */
     }
