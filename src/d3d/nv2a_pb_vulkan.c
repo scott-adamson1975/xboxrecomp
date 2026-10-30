@@ -1531,6 +1531,11 @@ static struct {
     uint32_t      st;
 } s_zpend;
 
+/* The stereo value of the latest stereo draw since the last flip (0: the frame is mono); handed to the window with the
+ * frame. */
+static uint32_t s_stereo_seen;
+extern void xbox_FramebufferWindowSetStereo(uint32_t value);
+
 /* The stereo helpers (below, before draw_scissor). */
 static int stereo_for(const RenderTarget *rt, float *k);
 static VkRect2D stereo_rect(const RenderTarget *rt, VkRect2D sr, int eye);
@@ -5174,7 +5179,8 @@ static int stereo_for(const RenderTarget *rt, float *k)
 
     if (!(sv & NV2A_STEREO_ON) || rt->w < 640 || rt->h < 480)
         return 0;
-    *k = (float)(sv & NV2A_STEREO_K_MASK) * 1e-6f;
+    *k = nv2a_stereo_k(sv);
+    s_stereo_seen = sv;
     return 1;
 }
 
@@ -8318,6 +8324,8 @@ static void vk_on_flip(uint32_t surface_offset, uint32_t pitch)
                 flush(0, FL_FLIP);
                 if (s_vf)
                     vt4 = now_ns();
+                xbox_FramebufferWindowSetStereo(s_stereo_seen);    /* a stereo pair, for a headset */
+                s_stereo_seen = 0;
                 xbox_FramebufferWindowPublishTexture();
                 if (s_vf) {
                     s_vf->f_back = vt2 - vt1;

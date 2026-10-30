@@ -65,6 +65,13 @@ static int fail(const char *fmt, const char *a, VkResult r)
     return 0;
 }
 
+static const struct nvk_create_hooks *s_hooks;
+
+void nvk_set_create_hooks(const struct nvk_create_hooks *h)
+{
+    s_hooks = h;
+}
+
 static int make_instance(const char *const *inst_exts, unsigned n)
 {
     const char *exts[32];
@@ -152,7 +159,8 @@ static int make_instance(const char *const *inst_exts, unsigned n)
     ci.ppEnabledExtensionNames = exts;
     ci.enabledLayerCount = nl;
     ci.ppEnabledLayerNames = layers;
-    r = vkCreateInstance(&ci, NULL, &s_core.inst);
+    r = s_hooks && s_hooks->create_instance ? s_hooks->create_instance(&ci, &s_core.inst)
+                                            : vkCreateInstance(&ci, NULL, &s_core.inst);
     if (r != VK_SUCCESS)
         return fail("vkCreateInstance failed%s: %s", "", r);
     return 1;
@@ -214,6 +222,15 @@ static int make_device(void)
     r = vkEnumeratePhysicalDevices(s_core.inst, &npd, pds);
     if ((r != VK_SUCCESS && r != VK_INCOMPLETE) || !npd)
         return fail("no Vulkan device%s (%s)", "", r);
+    {
+        VkPhysicalDevice only = s_hooks && s_hooks->physical_device ? s_hooks->physical_device(s_core.inst)
+                                                                      : VK_NULL_HANDLE;
+
+        if (only != VK_NULL_HANDLE) {      /* the host names the device (the headset's GPU) */
+            npd = 1;
+            pds[0] = only;
+        }
+    }
     for (i = 0; i < npd; i++) {
         uint32_t q = 0;
         int sc = device_score(pds[i], s_core.surface, &q);
@@ -378,7 +395,8 @@ static int make_device(void)
     dci.pQueueCreateInfos = &qci;
     dci.enabledExtensionCount = ne;
     dci.ppEnabledExtensionNames = exts;
-    r = vkCreateDevice(s_core.phys, &dci, NULL, &s_core.dev);
+    r = s_hooks && s_hooks->create_device ? s_hooks->create_device(s_core.phys, &dci, &s_core.dev)
+                                          : vkCreateDevice(s_core.phys, &dci, NULL, &s_core.dev);
     if (r != VK_SUCCESS)
         return fail("vkCreateDevice on %s failed: %s", s_core.name, r);
 #if defined(XR_VK_DYNAMIC)
