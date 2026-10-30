@@ -121,6 +121,13 @@ static unsigned s_next_id = 1;
 static int s_menu_set;                          /* the menu screen has its place */
 static float s_menu_pose[7];                    /* its orientation (x y z w) and position */
 void xbox_VrRecentre(void) { s_menu_set = 0; }
+void xbox_VrFrame(unsigned id, float vwx, float vwy)
+{
+    if (id && id < 256 && s_ring[id].pose.id == id && vwx > 0.1f && vwy > 0.1f) {
+        s_ring[id].pose.vwx = vwx;
+        s_ring[id].pose.vwy = vwy;
+    }
+}
 
 int xbox_VrPose(xbox_vr_pose *out)
 {
@@ -1267,6 +1274,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     (void)C; (void)slot; (void)w; (void)h; (void)fmt; (void)stereo; (void)flip;
 }
 void xbox_VrRecentre(void) {}
+void xbox_VrFrame(unsigned id, float vwx, float vwy) { (void)id; (void)vwx; (void)vwy; }
 void xbox_VrShutdown(void) {}
 
 #endif
