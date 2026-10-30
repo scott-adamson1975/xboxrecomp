@@ -63,7 +63,7 @@
     F(xrCreateSession) F(xrDestroySession) F(xrBeginSession) F(xrEndSession) F(xrCreateReferenceSpace) \
     F(xrDestroySpace) F(xrEnumerateSwapchainFormats) F(xrCreateSwapchain) F(xrDestroySwapchain) \
     F(xrEnumerateSwapchainImages) F(xrAcquireSwapchainImage) F(xrWaitSwapchainImage) F(xrReleaseSwapchainImage) \
-    F(xrWaitFrame) F(xrBeginFrame) F(xrEndFrame) F(xrResultToString)
+    F(xrWaitFrame) F(xrBeginFrame) F(xrEndFrame) F(xrResultToString) F(xrLocateViews)
 #define XR_FUNCS_VK(F) \
     F(xrGetVulkanGraphicsRequirements2KHR) F(xrCreateVulkanInstanceKHR) F(xrGetVulkanGraphicsDevice2KHR) \
     F(xrCreateVulkanDeviceKHR)
@@ -86,7 +86,7 @@ static struct {
     XrInstance inst;
     XrSystemId sys;
     XrSession sess;
-    XrSpace space;
+    XrSpace space;                              /* LOCAL: the head and the eyes are tracked in it */
     XrSwapchain sc;
     uint32_t nimg, sw, sh;
     int64_t sfmt;                               /* the swapchain format: a VkFormat or a DXGI_FORMAT */
@@ -96,6 +96,7 @@ static struct {
     VkFence *fences;
     char sysname[XR_MAX_SYSTEM_NAME_SIZE];
     unsigned frames;
+    int swap;                                   /* RECOMP_VR_SWAP=1: the left half to the right eye and the other way */
 #if defined(OXR_HAVE_D3D11)
     LUID luid;                                  /* the GPU the runtime wants */
     ID3D11Device *dev;
@@ -106,6 +107,25 @@ static struct {
     int vkimg_ready;
 #endif
 } X;
+
+/* The head poses: the latest, for the game, and a ring of the recent ones by id, for the frames drawn from them. */
+static struct { xbox_vr_pose pose; } s_ring[256];
+static xbox_vr_pose s_latest;
+static volatile unsigned s_pose_seq;            /* a seqlock: odd while s_latest is being written */
+static unsigned s_next_id = 1;
+
+int xbox_VrPose(xbox_vr_pose *out)
+{
+    unsigned a, b;
+
+    do {
+        a = __atomic_load_n(&s_pose_seq, __ATOMIC_ACQUIRE);
+        *out = s_latest;
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+        b = __atomic_load_n(&s_pose_seq, __ATOMIC_RELAXED);
+    } while ((a & 1u) || a != b);
+    return a != 0 && out->id != 0;
+}
 
 /* The first frames log each step before it runs (stderr is unbuffered): a crash inside the runtime then names its call. */
 static unsigned s_step_n;
@@ -282,6 +302,7 @@ int xbox_VrInit(void)
     X.inited = 1;
 #if defined(OXR_HAVE_D3D11)
     X.d3d = !(api && !strcmp(api, "vulkan"));
+    X.swap = getenv("RECOMP_VR_SWAP") != NULL && *getenv("RECOMP_VR_SWAP") == '1';
 #else
     X.d3d = 0;
     (void)api;
@@ -445,7 +466,7 @@ static int make_session(const struct nvk_core *C)
     }
     memset(&rsi, 0, sizeof rsi);
     rsi.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
-    rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;     /* head-locked, for now */
+    rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_LOCAL;
     rsi.poseInReferenceSpace.orientation.w = 1.0f;
     STEP("xrCreateReferenceSpace");
     r = p_xrCreateReferenceSpace(X.sess, &rsi, &X.space);
@@ -792,8 +813,9 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     const XrCompositionLayerBaseHeader *layers[1];
     XrResult r;
     uint32_t idx = 0;
-    int have_layer = 0;
-    float k, vwx, vwy, ipd;
+    int have_layer = 0, have_pose = 0;
+    float k, vwx = 0, vwy = 0, ipd = 0;
+    xbox_vr_pose pose;
 
     (void)fmt;
     (void)flip;
@@ -832,11 +854,75 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
         fprintf(stderr, VRLOG "xrBeginFrame: %s\n", rs(r));
         return;
     }
+    /* The head now, for the next picture the game draws. */
+    {
+        XrViewLocateInfo vli;
+        XrViewState vs;
+        XrView views[2];
+        uint32_t nv = 0;
+
+        memset(&vli, 0, sizeof vli);
+        vli.type = XR_TYPE_VIEW_LOCATE_INFO;
+        vli.viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
+        vli.displayTime = fs.predictedDisplayTime;
+        vli.space = X.space;
+        memset(&vs, 0, sizeof vs);
+        vs.type = XR_TYPE_VIEW_STATE;
+        memset(views, 0, sizeof views);
+        views[0].type = views[1].type = XR_TYPE_VIEW;
+        if (XR_SUCCEEDED(p_xrLocateViews(X.sess, &vli, &vs, 2, &nv, views)) && nv == 2
+                && (vs.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
+            xbox_vr_pose np;
+            float dx = views[1].pose.position.x - views[0].pose.position.x;
+            float dy = views[1].pose.position.y - views[0].pose.position.y;
+            float dz = views[1].pose.position.z - views[0].pose.position.z;
+            float t, m;
+            int e;
+
+            memset(&np, 0, sizeof np);
+            np.q[0] = views[0].pose.orientation.x;
+            np.q[1] = views[0].pose.orientation.y;
+            np.q[2] = views[0].pose.orientation.z;
+            np.q[3] = views[0].pose.orientation.w;
+            np.p[0] = 0.5f * (views[0].pose.position.x + views[1].pose.position.x);
+            np.p[1] = 0.5f * (views[0].pose.position.y + views[1].pose.position.y);
+            np.p[2] = 0.5f * (views[0].pose.position.z + views[1].pose.position.z);
+            np.ipd = sqrtf(dx * dx + dy * dy + dz * dz);
+            for (e = 0; e < 2; e++) {           /* the wider side of each, over both eyes */
+                t = tanf(-views[e].fov.angleLeft);
+                if (t > np.vwx) np.vwx = t;
+                t = tanf(views[e].fov.angleRight);
+                if (t > np.vwx) np.vwx = t;
+                t = tanf(views[e].fov.angleUp);
+                if (t > np.vwy) np.vwy = t;
+                t = tanf(-views[e].fov.angleDown);
+                if (t > np.vwy) np.vwy = t;
+            }
+            m = np.q[0] * np.q[0] + np.q[1] * np.q[1] + np.q[2] * np.q[2] + np.q[3] * np.q[3];
+            if (m > 0.5f && np.vwx > 0.1f && np.vwy > 0.1f) {
+                np.id = s_next_id;
+                s_next_id = s_next_id % 255u + 1u;               /* 1..255 */
+                s_ring[np.id].pose = np;
+                __atomic_store_n(&s_pose_seq, s_pose_seq + 1u, __ATOMIC_RELEASE);
+                s_latest = np;
+                __atomic_store_n(&s_pose_seq, s_pose_seq + 1u, __ATOMIC_RELEASE);
+            }
+        }
+    }
     k = nv2a_stereo_k(stereo);
-    vwx = nv2a_stereo_vwx(stereo);
-    vwy = nv2a_stereo_vwy(stereo);
-    ipd = 2.0f * k * vwx;                    /* K = ipd / 2 / vw.x */
-    if (fs.shouldRender && vwx > 0.0f && vwy > 0.0f) {
+    {
+        unsigned pid = nv2a_stereo_pose(stereo);
+
+        if (pid && s_ring[pid].pose.id == pid) {
+            pose = s_ring[pid].pose;            /* what the picture was drawn from */
+            have_pose = 1;
+        }
+    }
+    vwx = pose.vwx;
+    vwy = pose.vwy;
+    ipd = pose.ipd;
+    (void)k;
+    if (fs.shouldRender && have_pose) {
         XrSwapchainImageAcquireInfo ai;
         XrSwapchainImageWaitInfo wsi;
         int copied = 0;
@@ -889,16 +975,26 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
             lp.viewCount = 2;
             lp.views = pv;
             for (e = 0; e < 2; e++) {
+                /* The eye: the head's pose, half the eye separation to the left or right along the head's own right axis. */
+                float qx = pose.q[0], qy = pose.q[1], qz = pose.q[2], qw = pose.q[3];
+                float rx = 1.0f - 2.0f * (qy * qy + qz * qz), ry = 2.0f * (qx * qy + qw * qz), rz = 2.0f * (qx * qz - qw * qy);
+                float side = (e ? 0.5f : -0.5f) * ipd;
+
                 memset(&pv[e], 0, sizeof pv[e]);
                 pv[e].type = XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW;
-                pv[e].pose.orientation.w = 1.0f;
-                pv[e].pose.position.x = (e ? 0.5f : -0.5f) * ipd;
+                pv[e].pose.orientation.x = qx;
+                pv[e].pose.orientation.y = qy;
+                pv[e].pose.orientation.z = qz;
+                pv[e].pose.orientation.w = qw;
+                pv[e].pose.position.x = pose.p[0] + side * rx;
+                pv[e].pose.position.y = pose.p[1] + side * ry;
+                pv[e].pose.position.z = pose.p[2] + side * rz;
                 pv[e].fov.angleLeft = -atanf(vwx);
                 pv[e].fov.angleRight = atanf(vwx);
                 pv[e].fov.angleUp = atanf(vwy);
                 pv[e].fov.angleDown = -atanf(vwy);
                 pv[e].subImage.swapchain = X.sc;
-                pv[e].subImage.imageRect.offset.x = (int32_t)(e * (w / 2u));
+                pv[e].subImage.imageRect.offset.x = (int32_t)(((X.swap ? 1 - e : e)) * (w / 2u));   /* RECOMP_VR_SWAP=1 */
                 pv[e].subImage.imageRect.extent.width = (int32_t)(w / 2u);
                 pv[e].subImage.imageRect.extent.height = (int32_t)h;
             }
@@ -925,9 +1021,9 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     if (XR_FAILED(r))
         fprintf(stderr, VRLOG "xrEndFrame: %s\n", rs(r));
     if (X.frames++ == 0)
-        fprintf(stderr, VRLOG "first stereo frame to the headset: eye separation %.3f m, view window %.3f x %.3f "
-                "(field of view %.0f x %.0f degrees)\n", ipd, vwx, vwy, 2.0 * atan((double)vwx) * 57.29578,
-                2.0 * atan((double)vwy) * 57.29578);
+        fprintf(stderr, VRLOG "first stereo frame to the headset (pose %u): eye separation %.3f m, view window %.3f x %.3f "
+                "(field of view %.0f x %.0f degrees)%s\n", pose.id, ipd, vwx, vwy, 2.0 * atan((double)vwx) * 57.29578,
+                2.0 * atan((double)vwy) * 57.29578, X.swap ? ", eyes swapped" : "");
 }
 
 void xbox_VrShutdown(void)
