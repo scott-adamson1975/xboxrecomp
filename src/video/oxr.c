@@ -803,6 +803,99 @@ static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx, int 
     return 1;
 }
 
+#if defined(OXR_HAVE_D3D11)
+/* One swapchain per eye (the Direct3D 11 back end): the runtime is given each eye's own image, not a rectangle of a shared
+ * one (the rectangles were not honoured: each eye showed both halves). Each frame's half is copied across by the GPU. */
+static XrSwapchain s_esc[2];
+static XrSwapchainImageD3D11KHR *s_eimg[2];
+static uint32_t s_en[2];
+static int s_eye_state;                         /* 0 not tried, 1 made, -1 failed */
+
+static int make_eye_swapchains(uint32_t hw, uint32_t h)
+{
+    int e;
+
+    for (e = 0; e < 2; e++) {
+        XrSwapchainCreateInfo ci;
+        uint32_t i;
+        XrResult r;
+
+        memset(&ci, 0, sizeof ci);
+        ci.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
+        ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+        ci.format = X.sfmt;
+        ci.sampleCount = 1;
+        ci.width = hw;
+        ci.height = h;
+        ci.faceCount = 1;
+        ci.arraySize = 1;
+        ci.mipCount = 1;
+        nvk_queue_lock();
+        r = p_xrCreateSwapchain(X.sess, &ci, &s_esc[e]);
+        nvk_queue_unlock();
+        if (XR_FAILED(r)) {
+            fprintf(stderr, VRLOG "eye swapchain %d (%ux%u): %s\n", e, hw, h, rs(r));
+            return 0;
+        }
+        p_xrEnumerateSwapchainImages(s_esc[e], 0, &s_en[e], NULL);
+        s_eimg[e] = (XrSwapchainImageD3D11KHR *)calloc(s_en[e], sizeof *s_eimg[e]);
+        if (!s_eimg[e])
+            return 0;
+        for (i = 0; i < s_en[e]; i++)
+            s_eimg[e][i].type = XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR;
+        if (XR_FAILED(p_xrEnumerateSwapchainImages(s_esc[e], s_en[e], &s_en[e], (XrSwapchainImageBaseHeader *)s_eimg[e])))
+            return 0;
+    }
+    fprintf(stderr, VRLOG "one swapchain per eye, %ux%u\n", hw, h);
+    return 1;
+}
+
+/* The shared texture's half `e` into eye e's next image. 1 when both are done. */
+static int copy_eyes(uint32_t w, uint32_t h)
+{
+    int e, ok = 1;
+
+    for (e = 0; e < 2; e++) {
+        XrSwapchainImageAcquireInfo ai;
+        XrSwapchainImageWaitInfo wsi;
+        XrSwapchainImageReleaseInfo ri;
+        uint32_t idx = 0;
+        XrResult r;
+
+        memset(&ai, 0, sizeof ai);
+        ai.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
+        nvk_queue_lock();
+        r = p_xrAcquireSwapchainImage(s_esc[e], &ai, &idx);
+        nvk_queue_unlock();
+        if (XR_FAILED(r)) { ok = 0; continue; }
+        memset(&wsi, 0, sizeof wsi);
+        wsi.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
+        wsi.timeout = XR_INFINITE_DURATION;
+        r = p_xrWaitSwapchainImage(s_esc[e], &wsi);
+        if (XR_SUCCEEDED(r)) {
+            D3D11_BOX box;
+
+            box.left = (UINT)e * (w / 2u);
+            box.right = box.left + w / 2u;
+            box.top = 0;
+            box.bottom = h;
+            box.front = 0;
+            box.back = 1;
+            ID3D11DeviceContext_CopySubresourceRegion(X.ctx, (ID3D11Resource *)s_eimg[e][idx].texture, 0, 0, 0, 0,
+                                                      (ID3D11Resource *)X.shared, 0, &box);
+        } else
+            ok = 0;
+        memset(&ri, 0, sizeof ri);
+        ri.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
+        nvk_queue_lock();
+        p_xrReleaseSwapchainImage(s_esc[e], &ri);
+        nvk_queue_unlock();
+    }
+    ID3D11DeviceContext_Flush(X.ctx);
+    return ok;
+}
+#endif
+
 void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t h, VkFormat fmt, uint32_t stereo,
                     uint32_t flip)
 {
@@ -988,6 +1081,14 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
             nvk_queue_lock();
             p_xrReleaseSwapchainImage(X.sc, &ri);
             nvk_queue_unlock();
+#if defined(OXR_HAVE_D3D11)
+            if (!menu && X.d3d && s_eye_state >= 0) {
+                if (!s_eye_state)
+                    s_eye_state = make_eye_swapchains(w / 2u, h) ? 1 : -1;
+                if (s_eye_state > 0 && !copy_eyes(w, h))
+                    s_eye_state = -1;
+            }
+#endif
             if (menu) {
                 if (!s_menu_set) {              /* put the screen 2 m ahead of where the player looks now, and leave it there */
                     xbox_vr_pose hp;
@@ -1061,6 +1162,12 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
                 pv[e].fov.angleDown = -atanf(vwy);
                 pv[e].subImage.swapchain = X.sc;
                 pv[e].subImage.imageRect.offset.x = (int32_t)(((X.swap ? 1 - e : e)) * (w / 2u));   /* RECOMP_VR_SWAP=1 */
+#if defined(OXR_HAVE_D3D11)
+                if (s_eye_state > 0) {
+                    pv[e].subImage.swapchain = s_esc[X.swap ? 1 - e : e];
+                    pv[e].subImage.imageRect.offset.x = 0;
+                }
+#endif
                 pv[e].subImage.imageRect.extent.width = (int32_t)(w / 2u);
                 pv[e].subImage.imageRect.extent.height = (int32_t)h;
             }
