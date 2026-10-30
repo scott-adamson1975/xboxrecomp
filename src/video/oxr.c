@@ -2,21 +2,30 @@
  * oxr.c - a VR headset through OpenXR; see oxr.h. Written against OpenXR 1.1 (the Khronos headers, Apache-2.0 or MIT),
  * the loader opened at run time.
  *
- * What is here and why:
- *   - xbox_VrInit makes an XrInstance with XR_KHR_vulkan_enable2 and asks for the headset's system, then installs the
- *     core's creation hooks (nv2a_vk_core.h): the Vulkan instance, the physical device and the device are made by
- *     xrCreateVulkanInstanceKHR, xrGetVulkanGraphicsDevice2KHR and xrCreateVulkanDeviceKHR, which add the extensions
- *     the runtime needs and name the GPU the headset is on. (tools/win/xr-probe.c showed SteamVR accepts a Vulkan 1.3
- *     instance made this way.)
- *   - the session is made at the first stereo frame, on the core's device and queue, with a VIEW reference space (the
- *     picture is head-locked for now: the poses of the two eyes are half the eye separation to each side).
- *   - the swapchain is the stereo frame's size, B8G8R8A8_SRGB (else UNORM): the game's frame is raw display bytes, so
- *     it is copied raw (vkCmdCopyImage between the compatible formats) and the compositor decodes it as it is meant.
- *   - each frame the left half and the right half are the two eyes' sub-images of one projection layer, whose field of
- *     view is the game camera's view window (what the picture was drawn with), from the stereo value.
- *   - the queue is shared with the renderer's submits: everything that submits to it, or that the runtime may use it
- *     for (release, end frame), holds nvk_queue_lock().
+ * Two graphics back ends to the runtime, chosen at start-up:
+ *
+ *   Direct3D 11 (the default on Windows; RECOMP_VR_API=vulkan chooses the other). SteamVR's OpenXR runtime crashes in
+ *   xrCreateSwapchain for any Vulkan session on the development PC (an access violation inside the runtime, whatever the
+ *   swapchain's shape, the way the Vulkan device was made, the Vulkan version, the layers: tools/win/xr-probe.c
+ *   reproduces it on its own), while the same call through Direct3D 11 works. So the renderer stays Vulkan, and each
+ *   stereo frame goes to the headset through a Direct3D 11 texture both APIs share: the renderer's frame is copied
+ *   into a shared texture (a Vulkan image on the memory of a D3D11 texture, VK_KHR_external_memory_win32), the copy is
+ *   waited for on the CPU, and the headset's D3D11 swapchain image is filled by CopyResource from it. The Vulkan device
+ *   is the renderer's own (made normally, on the GPU the runtime names by LUID, with the external memory extensions).
+ *
+ *   Vulkan (XR_KHR_vulkan_enable2): the Vulkan instance, physical device and device are made through the runtime
+ *   (creation hooks in nv2a_vk_core.h) and the frame is copied raw into the runtime's Vulkan swapchain. Works with a
+ *   runtime that has no such bug.
+ *
+ * Both: the session is made at the first stereo frame; the swapchain is the stereo frame's size, an sRGB format (the
+ * game's frame is raw display bytes, copied raw: the compositor then decodes it as it is meant); each frame the left half
+ * and the right half are the two eyes' sub-images of one projection layer in the VIEW space (head-locked for now), whose
+ * field of view is the game camera's view window (from the stereo value). The queue is shared with the renderer's
+ * submits: everything that submits to it, or that the runtime may use it for, holds nvk_queue_lock().
  */
+#if defined(_WIN32)
+#define VK_USE_PLATFORM_WIN32_KHR 1
+#endif
 #include "oxr.h"
 
 #if defined(XBOXRECOMP_HAVE_OPENXR) && defined(XBOXRECOMP_HAVE_VULKAN)
@@ -28,9 +37,15 @@
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
+#define COBJMACROS
 #include <windows.h>
 #include <unknwn.h>
+#include <d3d11.h>
+#include <dxgi1_2.h>
+#include <vulkan/vulkan_win32.h>      /* the build force-includes vulkan.h before this file defines the platform */
 #define XR_USE_PLATFORM_WIN32
+#define XR_USE_GRAPHICS_API_D3D11
+#define OXR_HAVE_D3D11 1
 #else
 #include <dlfcn.h>
 #endif
@@ -43,19 +58,30 @@
 
 #define VRLOG "[VR] "
 
-#define XR_FUNCS(F) \
-    F(xrCreateInstance) F(xrDestroyInstance) F(xrGetSystem) F(xrGetSystemProperties) F(xrPollEvent) \
+#define XR_FUNCS_COMMON(F) \
+    F(xrDestroyInstance) F(xrGetSystem) F(xrGetSystemProperties) F(xrPollEvent) \
     F(xrCreateSession) F(xrDestroySession) F(xrBeginSession) F(xrEndSession) F(xrCreateReferenceSpace) \
     F(xrDestroySpace) F(xrEnumerateSwapchainFormats) F(xrCreateSwapchain) F(xrDestroySwapchain) \
     F(xrEnumerateSwapchainImages) F(xrAcquireSwapchainImage) F(xrWaitSwapchainImage) F(xrReleaseSwapchainImage) \
-    F(xrWaitFrame) F(xrBeginFrame) F(xrEndFrame) F(xrResultToString) F(xrGetVulkanGraphicsRequirements2KHR) \
-    F(xrCreateVulkanInstanceKHR) F(xrGetVulkanGraphicsDevice2KHR) F(xrCreateVulkanDeviceKHR)
+    F(xrWaitFrame) F(xrBeginFrame) F(xrEndFrame) F(xrResultToString)
+#define XR_FUNCS_VK(F) \
+    F(xrGetVulkanGraphicsRequirements2KHR) F(xrCreateVulkanInstanceKHR) F(xrGetVulkanGraphicsDevice2KHR) \
+    F(xrCreateVulkanDeviceKHR)
+#if defined(OXR_HAVE_D3D11)
+#define XR_FUNCS_D3D(F) F(xrGetD3D11GraphicsRequirementsKHR)
+#else
+#define XR_FUNCS_D3D(F)
+#endif
 #define XR_DECL(n) static PFN_##n p_##n;
-XR_FUNCS(XR_DECL)
+XR_FUNCS_COMMON(XR_DECL)
+XR_FUNCS_VK(XR_DECL)
+XR_FUNCS_D3D(XR_DECL)
 static PFN_xrGetInstanceProcAddr p_xrGetInstanceProcAddr;
+static PFN_xrCreateInstance p_xrCreateInstance;
 
 static struct {
     int inited, ok, failed, running, session_made, ended;
+    int d3d;                                    /* the Direct3D 11 back end (else Vulkan) */
     void *lib;
     XrInstance inst;
     XrSystemId sys;
@@ -63,18 +89,27 @@ static struct {
     XrSpace space;
     XrSwapchain sc;
     uint32_t nimg, sw, sh;
-    VkFormat sfmt;
-    XrSwapchainImageVulkan2KHR *imgs;
+    int64_t sfmt;                               /* the swapchain format: a VkFormat or a DXGI_FORMAT */
+    void *imgs;                                 /* the runtime's images (XrSwapchainImageVulkan2KHR or ...D3D11KHR) */
     VkCommandPool pool;
     VkCommandBuffer *cbs;
     VkFence *fences;
     char sysname[XR_MAX_SYSTEM_NAME_SIZE];
     unsigned frames;
+#if defined(OXR_HAVE_D3D11)
+    LUID luid;                                  /* the GPU the runtime wants */
+    ID3D11Device *dev;
+    ID3D11DeviceContext *ctx;
+    ID3D11Texture2D *shared;                    /* the texture both APIs see */
+    VkImage vkimg;                              /* ... as a Vulkan image */
+    VkDeviceMemory vkmem;
+    int vkimg_ready;
+#endif
 } X;
 
 /* The first frames log each step before it runs (stderr is unbuffered): a crash inside the runtime then names its call. */
 static unsigned s_step_n;
-#define STEP(what) do { if (s_step_n < 40) { s_step_n++; fprintf(stderr, VRLOG "step: %s\n", what); } } while (0)
+#define STEP(what) do { if (s_step_n < 60) { s_step_n++; fprintf(stderr, VRLOG "step: %s\n", what); } } while (0)
 
 static const char *rs(XrResult r)
 {
@@ -89,19 +124,15 @@ static const char *rs(XrResult r)
 static void *open_loader(void)
 {
 #if defined(_WIN32)
-    static const char *names[] = { "openxr_loader.dll", NULL, NULL };
     char steamvr[MAX_PATH];
     const char *pf = getenv("ProgramFiles(x86)");
-    int i;
-    void *h;
+    void *h = (void *)LoadLibraryA("openxr_loader.dll");
 
-    if (pf) {
+    if (!h && pf) {
         snprintf(steamvr, sizeof steamvr, "%s\\Steam\\steamapps\\common\\SteamVR\\bin\\win64\\openxr_loader.dll", pf);
-        names[1] = steamvr;
+        h = (void *)LoadLibraryA(steamvr);
     }
-    for (i = 0; i < 3 && !(h = names[i] ? (void *)LoadLibraryA(names[i]) : NULL); i++)
-        ;
-    return i < 3 ? h : NULL;
+    return h;
 #else
     void *h = dlopen("libopenxr_loader.so.1", RTLD_NOW);
 
@@ -118,12 +149,11 @@ static void *sym(const char *name)
 #endif
 }
 
-/* ---- Vulkan creation, through the runtime ------------------------------------------------------- */
+/* ---- the Vulkan back end: creation through the runtime ------------------------------------------- */
 
 /* The function lookup the runtime is given. It calls vkCreateInstance and vkCreateDevice itself, with the create info
- * it has added to; those two must be the toolkit's own (vk_dyn.h: on Windows and Linux the Vulkan loader is opened at
- * run time and the instance's and the device's function pointers are loaded by those two wrappers: with the loader's
- * bare ones the next Vulkan call finds a null pointer). Everything else is the loader's. */
+ * it has added to; those two must be the toolkit's own (vk_dyn.h: the instance's and the device's function pointers
+ * are loaded by those wrappers: with the loader's bare ones the next Vulkan call finds a null pointer). */
 static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL oxr_gipa(VkInstance instance, const char *name)
 {
     if (!strcmp(name, "vkCreateInstance"))
@@ -154,7 +184,7 @@ static VkResult hk_create_instance(const VkInstanceCreateInfo *ci, VkInstance *o
     return vr;
 }
 
-static VkPhysicalDevice hk_physical_device(VkInstance inst)
+static VkPhysicalDevice hk_physical_device_vk(VkInstance inst)
 {
     XrVulkanGraphicsDeviceGetInfoKHR gi;
     VkPhysicalDevice pd = VK_NULL_HANDLE;
@@ -194,20 +224,69 @@ static VkResult hk_create_device(VkPhysicalDevice pd, const VkDeviceCreateInfo *
     return vr;
 }
 
-static const struct nvk_create_hooks s_hooks = { hk_create_instance, hk_physical_device, hk_create_device };
+static const struct nvk_create_hooks s_hooks_vk = { hk_create_instance, hk_physical_device_vk, hk_create_device, NULL };
+
+#if defined(OXR_HAVE_D3D11)
+/* ---- the Direct3D 11 back end: the renderer's own Vulkan device, on the runtime's GPU ----------------- */
+
+/* The GPU the runtime wants, by LUID among the Vulkan devices. */
+static VkPhysicalDevice hk_physical_device_d3d(VkInstance inst)
+{
+    VkPhysicalDevice pds[8];
+    uint32_t n = 8, i;
+
+    if (vkEnumeratePhysicalDevices(inst, &n, pds) != VK_SUCCESS && !n)
+        return VK_NULL_HANDLE;
+    for (i = 0; i < n; i++) {
+        VkPhysicalDeviceIDProperties idp;
+        VkPhysicalDeviceProperties2 p2;
+
+        memset(&idp, 0, sizeof idp);
+        idp.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ID_PROPERTIES;
+        memset(&p2, 0, sizeof p2);
+        p2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2;
+        p2.pNext = &idp;
+        vkGetPhysicalDeviceProperties2(pds[i], &p2);
+        if (idp.deviceLUIDValid && !memcmp(idp.deviceLUID, &X.luid, sizeof X.luid)) {
+            fprintf(stderr, VRLOG "the headset's GPU (LUID %08lx:%08lx) is \"%s\"\n", (unsigned long)X.luid.HighPart,
+                    (unsigned long)X.luid.LowPart, p2.properties.deviceName);
+            return pds[i];
+        }
+    }
+    fprintf(stderr, VRLOG "no Vulkan device has the headset's LUID: the renderer's own choice\n");
+    return VK_NULL_HANDLE;
+}
+
+static const char *const s_dev_exts[] = { "VK_KHR_external_memory", "VK_KHR_external_memory_win32" };
+
+static const char *const *hk_device_extensions(unsigned *n)
+{
+    *n = (unsigned)(sizeof s_dev_exts / sizeof s_dev_exts[0]);
+    return s_dev_exts;
+}
+
+static const struct nvk_create_hooks s_hooks_d3d = { NULL, hk_physical_device_d3d, NULL, hk_device_extensions };
+#endif
 
 int xbox_VrInit(void)
 {
     XrInstanceCreateInfo ci;
     XrSystemGetInfo gi;
     XrSystemProperties sp;
-    XrGraphicsRequirementsVulkan2KHR req;
-    static const char *exts[] = { "XR_KHR_vulkan_enable2" };
+    const char *ext;
+    const char *api = getenv("RECOMP_VR_API");
     XrResult r;
 
     if (X.inited)
         return X.ok;
     X.inited = 1;
+#if defined(OXR_HAVE_D3D11)
+    X.d3d = !(api && !strcmp(api, "vulkan"));
+#else
+    X.d3d = 0;
+    (void)api;
+#endif
+    ext = X.d3d ? "XR_KHR_D3D11_enable" : "XR_KHR_vulkan_enable2";
     X.lib = open_loader();
     if (!X.lib) {
         fprintf(stderr, VRLOG "no OpenXR loader (openxr_loader.dll): VR off\n");
@@ -227,10 +306,10 @@ int xbox_VrInit(void)
     snprintf(ci.applicationInfo.applicationName, sizeof ci.applicationInfo.applicationName, "Takedawn");
     snprintf(ci.applicationInfo.engineName, sizeof ci.applicationInfo.engineName, "xboxrecomp");
     ci.enabledExtensionCount = 1;
-    ci.enabledExtensionNames = exts;
+    ci.enabledExtensionNames = &ext;
     r = p_xrCreateInstance(&ci, &X.inst);
     if (XR_FAILED(r)) {
-        fprintf(stderr, VRLOG "xrCreateInstance: %d (no OpenXR runtime, or it lacks XR_KHR_vulkan_enable2): VR off\n", (int)r);
+        fprintf(stderr, VRLOG "xrCreateInstance: %d (no OpenXR runtime, or it lacks %s): VR off\n", (int)r, ext);
         return 0;
     }
 #define XR_LOAD(n) \
@@ -238,7 +317,14 @@ int xbox_VrInit(void)
         fprintf(stderr, VRLOG "the runtime has no %s: VR off\n", #n); \
         return 0; \
     }
-    XR_FUNCS(XR_LOAD)
+    XR_FUNCS_COMMON(XR_LOAD)
+    if (X.d3d) {
+#if defined(OXR_HAVE_D3D11)
+        XR_FUNCS_D3D(XR_LOAD)
+#endif
+    } else {
+        XR_FUNCS_VK(XR_LOAD)
+    }
 #undef XR_LOAD
     memset(&gi, 0, sizeof gi);
     gi.type = XR_TYPE_SYSTEM_GET_INFO;
@@ -252,17 +338,35 @@ int xbox_VrInit(void)
     sp.type = XR_TYPE_SYSTEM_PROPERTIES;
     p_xrGetSystemProperties(X.inst, X.sys, &sp);
     snprintf(X.sysname, sizeof X.sysname, "%s", sp.systemName);
-    memset(&req, 0, sizeof req);
-    req.type = XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR;
-    r = p_xrGetVulkanGraphicsRequirements2KHR(X.inst, X.sys, &req);
-    if (XR_FAILED(r)) {
-        fprintf(stderr, VRLOG "xrGetVulkanGraphicsRequirements2KHR: %s: VR off\n", rs(r));
-        return 0;
+    if (X.d3d) {
+#if defined(OXR_HAVE_D3D11)
+        XrGraphicsRequirementsD3D11KHR req;
+
+        memset(&req, 0, sizeof req);
+        req.type = XR_TYPE_GRAPHICS_REQUIREMENTS_D3D11_KHR;
+        r = p_xrGetD3D11GraphicsRequirementsKHR(X.inst, X.sys, &req);
+        if (XR_FAILED(r)) {
+            fprintf(stderr, VRLOG "xrGetD3D11GraphicsRequirementsKHR: %s: VR off\n", rs(r));
+            return 0;
+        }
+        X.luid = req.adapterLuid;
+        nvk_set_create_hooks(&s_hooks_d3d);
+#endif
+    } else {
+        XrGraphicsRequirementsVulkan2KHR req;
+
+        memset(&req, 0, sizeof req);
+        req.type = XR_TYPE_GRAPHICS_REQUIREMENTS_VULKAN2_KHR;
+        r = p_xrGetVulkanGraphicsRequirements2KHR(X.inst, X.sys, &req);
+        if (XR_FAILED(r)) {
+            fprintf(stderr, VRLOG "xrGetVulkanGraphicsRequirements2KHR: %s: VR off\n", rs(r));
+            return 0;
+        }
+        nvk_set_create_hooks(&s_hooks_vk);
     }
-    nvk_set_create_hooks(&s_hooks);
     X.ok = 1;
-    fprintf(stderr, VRLOG "headset \"%s\": the Vulkan instance and device will be made through the OpenXR runtime\n",
-            X.sysname);
+    fprintf(stderr, VRLOG "headset \"%s\": through %s%s\n", X.sysname, X.d3d ? "Direct3D 11 (shared with Vulkan)" : "Vulkan",
+            X.d3d ? "" : ", the Vulkan device made by the OpenXR runtime");
     return 1;
 }
 
@@ -282,22 +386,55 @@ static void fail(const char *why)
 
 static int make_session(const struct nvk_core *C)
 {
-    XrGraphicsBindingVulkan2KHR gb;
     XrSessionCreateInfo si;
     XrReferenceSpaceCreateInfo rsi;
     XrResult r;
+#if defined(OXR_HAVE_D3D11)
+    XrGraphicsBindingD3D11KHR gd;
+#endif
+    XrGraphicsBindingVulkan2KHR gv;
 
-    memset(&gb, 0, sizeof gb);
-    gb.type = XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR;
-    gb.instance = C->inst;
-    gb.physicalDevice = C->phys;
-    gb.device = C->dev;
-    gb.queueFamilyIndex = C->qfam;
-    gb.queueIndex = 0;
     memset(&si, 0, sizeof si);
     si.type = XR_TYPE_SESSION_CREATE_INFO;
-    si.next = &gb;
     si.systemId = X.sys;
+    if (X.d3d) {
+#if defined(OXR_HAVE_D3D11)
+        IDXGIFactory1 *fac = NULL;
+        IDXGIAdapter1 *ad = NULL, *pick = NULL;
+        D3D_FEATURE_LEVEL fl = D3D_FEATURE_LEVEL_11_0;
+        UINT k;
+
+        STEP("the Direct3D 11 device");
+        if (FAILED(CreateDXGIFactory1(&IID_IDXGIFactory1, (void **)&fac)))
+            return 0;
+        for (k = 0; IDXGIFactory1_EnumAdapters1(fac, k, &ad) == S_OK; k++) {
+            DXGI_ADAPTER_DESC1 d;
+
+            IDXGIAdapter1_GetDesc1(ad, &d);
+            if (d.AdapterLuid.LowPart == X.luid.LowPart && d.AdapterLuid.HighPart == X.luid.HighPart)
+                pick = ad;
+        }
+        if (!pick || FAILED(D3D11CreateDevice((IDXGIAdapter *)pick, D3D_DRIVER_TYPE_UNKNOWN, NULL,
+                                              D3D11_CREATE_DEVICE_BGRA_SUPPORT, &fl, 1, D3D11_SDK_VERSION, &X.dev, NULL,
+                                              &X.ctx))) {
+            fprintf(stderr, VRLOG "no Direct3D 11 device on the headset's GPU\n");
+            return 0;
+        }
+        memset(&gd, 0, sizeof gd);
+        gd.type = XR_TYPE_GRAPHICS_BINDING_D3D11_KHR;
+        gd.device = X.dev;
+        si.next = &gd;
+#endif
+    } else {
+        memset(&gv, 0, sizeof gv);
+        gv.type = XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR;
+        gv.instance = C->inst;
+        gv.physicalDevice = C->phys;
+        gv.device = C->dev;
+        gv.queueFamilyIndex = C->qfam;
+        gv.queueIndex = 0;
+        si.next = &gv;
+    }
     STEP("xrCreateSession");
     nvk_queue_lock();
     r = p_xrCreateSession(X.inst, &si, &X.sess);
@@ -317,7 +454,7 @@ static int make_session(const struct nvk_core *C)
         return 0;
     }
     X.session_made = 1;
-    fprintf(stderr, VRLOG "session made on the renderer's device and queue (family %u)\n", C->qfam);
+    fprintf(stderr, VRLOG "session made (%s)\n", X.d3d ? "Direct3D 11" : "on the renderer's Vulkan device and queue");
     return 1;
 }
 
@@ -369,6 +506,109 @@ static void poll_events(void)
     }
 }
 
+#if defined(OXR_HAVE_D3D11)
+/* The shared texture: a D3D11 texture with an NT handle, and a Vulkan image on its memory. */
+static int make_shared(const struct nvk_core *C, uint32_t w, uint32_t h)
+{
+    D3D11_TEXTURE2D_DESC td;
+    IDXGIResource1 *res = NULL;
+    HANDLE hnd = NULL;
+    VkExternalMemoryImageCreateInfo emi;
+    VkImageCreateInfo ici;
+    VkMemoryRequirements mr;
+    VkPhysicalDeviceMemoryProperties mp;
+    VkMemoryDedicatedAllocateInfo ded;
+    VkImportMemoryWin32HandleInfoKHR imp;
+    VkMemoryAllocateInfo mai;
+    uint32_t i, ti = 0xFFFFFFFFu;
+    VkResult vr;
+
+    STEP("the shared texture");
+    memset(&td, 0, sizeof td);
+    td.Width = w;
+    td.Height = h;
+    td.MipLevels = 1;
+    td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    td.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+    if (FAILED(ID3D11Device_CreateTexture2D(X.dev, &td, NULL, &X.shared))) {
+        fprintf(stderr, VRLOG "cannot make the shared Direct3D 11 texture\n");
+        return 0;
+    }
+    if (FAILED(ID3D11Texture2D_QueryInterface(X.shared, &IID_IDXGIResource1, (void **)&res))
+            || FAILED(IDXGIResource1_CreateSharedHandle(res, NULL, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+                                                         NULL, &hnd))) {
+        fprintf(stderr, VRLOG "cannot share the Direct3D 11 texture (no NT handle)\n");
+        return 0;
+    }
+    IDXGIResource1_Release(res);
+    STEP("the Vulkan image on the shared memory");
+    memset(&emi, 0, sizeof emi);
+    emi.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+    emi.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT;
+    memset(&ici, 0, sizeof ici);
+    ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ici.pNext = &emi;
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.format = VK_FORMAT_B8G8R8A8_UNORM;
+    ici.extent.width = w;
+    ici.extent.height = h;
+    ici.extent.depth = 1;
+    ici.mipLevels = 1;
+    ici.arrayLayers = 1;
+    ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ici.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    vr = vkCreateImage(C->dev, &ici, NULL, &X.vkimg);
+    if (vr != VK_SUCCESS) {
+        fprintf(stderr, VRLOG "vkCreateImage for the shared texture: %d\n", (int)vr);
+        return 0;
+    }
+    vkGetImageMemoryRequirements(C->dev, X.vkimg, &mr);
+    vkGetPhysicalDeviceMemoryProperties(C->phys, &mp);
+    for (i = 0; i < mp.memoryTypeCount; i++)
+        if ((mr.memoryTypeBits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)) {
+            ti = i;
+            break;
+        }
+    if (ti == 0xFFFFFFFFu) {
+        fprintf(stderr, VRLOG "no device-local memory type for the shared texture\n");
+        return 0;
+    }
+    memset(&ded, 0, sizeof ded);
+    ded.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO;
+    ded.image = X.vkimg;
+    memset(&imp, 0, sizeof imp);
+    imp.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_WIN32_HANDLE_INFO_KHR;
+    imp.pNext = &ded;
+    imp.handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_D3D11_TEXTURE_BIT;
+    imp.handle = hnd;
+    memset(&mai, 0, sizeof mai);
+    mai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    mai.pNext = &imp;
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = ti;
+    vr = vkAllocateMemory(C->dev, &mai, NULL, &X.vkmem);
+    if (vr != VK_SUCCESS) {
+        fprintf(stderr, VRLOG "vkAllocateMemory importing the Direct3D 11 texture: %d (the Vulkan device lacks"
+                " VK_KHR_external_memory_win32, or the texture's memory is not importable)\n", (int)vr);
+        return 0;
+    }
+    vr = vkBindImageMemory(C->dev, X.vkimg, X.vkmem, 0);
+    CloseHandle(hnd);
+    if (vr != VK_SUCCESS) {
+        fprintf(stderr, VRLOG "vkBindImageMemory: %d\n", (int)vr);
+        return 0;
+    }
+    X.vkimg_ready = 1;
+    return 1;
+}
+#endif
+
 static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
 {
     uint32_t n = 0, i;
@@ -378,7 +618,17 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     VkCommandBufferAllocateInfo ai;
     VkFenceCreateInfo fi;
     XrResult r;
+    int64_t want[2] = { 0, 0 };
 
+    if (X.d3d) {
+#if defined(OXR_HAVE_D3D11)
+        want[0] = DXGI_FORMAT_B8G8R8A8_UNORM_SRGB;      /* raw bytes: B8G8R8A8 on both sides */
+        want[1] = DXGI_FORMAT_B8G8R8A8_UNORM;
+#endif
+    } else {
+        want[0] = VK_FORMAT_B8G8R8A8_SRGB;
+        want[1] = VK_FORMAT_B8G8R8A8_UNORM;
+    }
     STEP("xrEnumerateSwapchainFormats");
     p_xrEnumerateSwapchainFormats(X.sess, 0, &n, NULL);
     fmts = (int64_t *)calloc(n ? n : 1, sizeof *fmts);
@@ -386,10 +636,10 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
         return 0;
     p_xrEnumerateSwapchainFormats(X.sess, n, &n, fmts);
     for (i = 0; i < n; i++)
-        if (fmts[i] == (int64_t)VK_FORMAT_B8G8R8A8_SRGB)
+        if (fmts[i] == want[0])
             pick = fmts[i];
     for (i = 0; i < n && !pick; i++)
-        if (fmts[i] == (int64_t)VK_FORMAT_B8G8R8A8_UNORM)
+        if (fmts[i] == want[1])
             pick = fmts[i];
     if (!pick) {
         fprintf(stderr, VRLOG "the runtime offers no B8G8R8A8 swapchain format (%u formats): the frame cannot be copied raw\n", n);
@@ -399,8 +649,8 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     free(fmts);
     memset(&ci, 0, sizeof ci);
     ci.type = XR_TYPE_SWAPCHAIN_CREATE_INFO;
-    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT
-                  | XR_SWAPCHAIN_USAGE_SAMPLED_BIT;
+    ci.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT | XR_SWAPCHAIN_USAGE_SAMPLED_BIT
+                  | (X.d3d ? 0 : XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT);
     ci.format = pick;
     ci.sampleCount = 1;
     ci.width = w;
@@ -418,24 +668,36 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     }
     STEP("xrEnumerateSwapchainImages (count)");
     p_xrEnumerateSwapchainImages(X.sc, 0, &X.nimg, NULL);
-    X.imgs = (XrSwapchainImageVulkan2KHR *)calloc(X.nimg, sizeof *X.imgs);
     X.cbs = (VkCommandBuffer *)calloc(X.nimg, sizeof *X.cbs);
     X.fences = (VkFence *)calloc(X.nimg, sizeof *X.fences);
+    if (X.d3d) {
+#if defined(OXR_HAVE_D3D11)
+        XrSwapchainImageD3D11KHR *im = (XrSwapchainImageD3D11KHR *)calloc(X.nimg, sizeof *im);
+
+        for (i = 0; im && i < X.nimg; i++)
+            im[i].type = XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR;
+        X.imgs = im;
+#endif
+    } else {
+        XrSwapchainImageVulkan2KHR *im = (XrSwapchainImageVulkan2KHR *)calloc(X.nimg, sizeof *im);
+
+        for (i = 0; im && i < X.nimg; i++)
+            im[i].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR;
+        X.imgs = im;
+    }
     if (!X.imgs || !X.cbs || !X.fences)
         return 0;
-    for (i = 0; i < X.nimg; i++)
-        X.imgs[i].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR;
     STEP("xrEnumerateSwapchainImages (images)");
     r = p_xrEnumerateSwapchainImages(X.sc, X.nimg, &X.nimg, (XrSwapchainImageBaseHeader *)X.imgs);
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrEnumerateSwapchainImages: %s\n", rs(r));
         return 0;
     }
+    STEP("the command pool, buffers and fences");
     memset(&pi, 0, sizeof pi);
     pi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pi.queueFamilyIndex = C->qfam;
-    STEP("the command pool, buffers and fences");
     if (vkCreateCommandPool(C->dev, &pi, NULL, &X.pool) != VK_SUCCESS)
         return 0;
     memset(&ai, 0, sizeof ai);
@@ -451,24 +713,40 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     for (i = 0; i < X.nimg; i++)
         if (vkCreateFence(C->dev, &fi, NULL, &X.fences[i]) != VK_SUCCESS)
             return 0;
+#if defined(OXR_HAVE_D3D11)
+    if (X.d3d && !make_shared(C, w, h))
+        return 0;
+#endif
     X.sw = w;
     X.sh = h;
-    X.sfmt = (VkFormat)pick;
-    fprintf(stderr, VRLOG "swapchain %ux%u, %u images, format %s\n", w, h, X.nimg,
-            X.sfmt == VK_FORMAT_B8G8R8A8_SRGB ? "B8G8R8A8_SRGB" : "B8G8R8A8_UNORM");
+    X.sfmt = pick;
+    fprintf(stderr, VRLOG "swapchain %ux%u, %u images, format %lld (%s)\n", w, h, X.nimg, (long long)pick,
+            X.d3d ? "DXGI" : "Vulkan");
     return 1;
 }
 
-/* The raw copy of the frame into swapchain image `idx`, submitted. */
-static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx)
+/* The raw copy of the frame: into the runtime's Vulkan image `idx` (the Vulkan back end), or into the shared texture (the
+ * Direct3D 11 back end, copied on into the runtime's image afterwards by the caller). Submitted; with `wait`, waited for. */
+static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx, int wait)
 {
     VkCommandBuffer cb = X.cbs[idx];
     VkCommandBufferBeginInfo bi;
     VkImageCopy ic;
     VkSubmitInfo si;
     VkResult r;
-    VkImage dst = X.imgs[idx].image;
+    VkImage dst;
+    VkImageLayout end_layout;
 
+#if defined(OXR_HAVE_D3D11)
+    if (X.d3d) {
+        dst = X.vkimg;
+        end_layout = VK_IMAGE_LAYOUT_GENERAL;
+    } else
+#endif
+    {
+        dst = ((XrSwapchainImageVulkan2KHR *)X.imgs)[idx].image;
+        end_layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    }
     vkWaitForFences(C->dev, 1, &X.fences[idx], VK_TRUE, UINT64_MAX);
     vkResetFences(C->dev, 1, &X.fences[idx]);
     vkResetCommandBuffer(cb, 0);
@@ -486,8 +764,7 @@ static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx)
     ic.extent.height = X.sh;
     ic.extent.depth = 1;
     vkCmdCopyImage(cb, slot, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
-    nvk_image_barrier(cb, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    nvk_image_barrier(cb, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, end_layout);
     vkEndCommandBuffer(cb);
     memset(&si, 0, sizeof si);
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -496,7 +773,11 @@ static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx)
     nvk_queue_lock();
     r = vkQueueSubmit(C->queue, 1, &si, X.fences[idx]);
     nvk_queue_unlock();
-    return r == VK_SUCCESS;
+    if (r != VK_SUCCESS)
+        return 0;
+    if (wait)       /* the other API reads what this wrote: the CPU waits for it */
+        vkWaitForFences(C->dev, 1, &X.fences[idx], VK_TRUE, UINT64_MAX);
+    return 1;
 }
 
 void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t h, VkFormat fmt, uint32_t stereo,
@@ -558,7 +839,13 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     if (fs.shouldRender && vwx > 0.0f && vwy > 0.0f) {
         XrSwapchainImageAcquireInfo ai;
         XrSwapchainImageWaitInfo wsi;
+        int copied = 0;
+        uint32_t cbidx = X.frames % X.nimg;      /* the Direct3D 11 path's command buffer; the Vulkan path's is the image's */
 
+        if (X.d3d) {
+            STEP("the copy into the shared texture");
+            copied = copy_frame(C, slot, cbidx, 1);
+        }
         memset(&ai, 0, sizeof ai);
         ai.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
         STEP("xrAcquireSwapchainImage");
@@ -572,8 +859,21 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
             STEP("xrWaitSwapchainImage");
             r = p_xrWaitSwapchainImage(X.sc, &wsi);
         }
-        STEP("the copy");
-        if (XR_SUCCEEDED(r) && copy_frame(C, slot, idx)) {
+        if (XR_SUCCEEDED(r)) {
+            if (!X.d3d) {
+                STEP("the copy into the runtime's Vulkan image");
+                copied = copy_frame(C, slot, idx, 0);
+            }
+#if defined(OXR_HAVE_D3D11)
+            else if (copied) {
+                STEP("CopyResource into the runtime's Direct3D 11 image");
+                ID3D11DeviceContext_CopyResource(X.ctx, (ID3D11Resource *)((XrSwapchainImageD3D11KHR *)X.imgs)[idx].texture,
+                                                 (ID3D11Resource *)X.shared);
+                ID3D11DeviceContext_Flush(X.ctx);
+            }
+#endif
+        }
+        if (XR_SUCCEEDED(r) && copied) {
             XrSwapchainImageReleaseInfo ri;
             int e;
 

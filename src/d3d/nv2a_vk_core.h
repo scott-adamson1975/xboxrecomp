@@ -78,6 +78,8 @@ struct nvk_create_hooks {
     VkResult         (*create_instance)(const VkInstanceCreateInfo *ci, VkInstance *out);
     VkPhysicalDevice (*physical_device)(VkInstance inst);
     VkResult         (*create_device)(VkPhysicalDevice pd, const VkDeviceCreateInfo *ci, VkDevice *out);
+    /* Device extensions to enable besides the core's own, when the device has them (a headset path's external memory). */
+    const char *const *(*device_extensions)(unsigned *n);
 };
 void nvk_set_create_hooks(const struct nvk_create_hooks *h);
 
