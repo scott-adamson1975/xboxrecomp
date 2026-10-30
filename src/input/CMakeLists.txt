@@ -25,7 +25,7 @@ if(WIN32 AND NOT XBOXRECOMP_WIN_VULKAN)
     target_link_libraries(xbox_input PUBLIC platform xinput)
 else()
     find_package(SDL2 REQUIRED)
-    target_sources(xbox_input PRIVATE keyboard_sdl.c touch_pad_sdl.c)
+    target_sources(xbox_input PRIVATE keyboard_sdl.c touch_pad_sdl.c wheel_sdl.c)
     if(ANDROID)
         # The title's rumble on the device's own vibrator (JNI).
         target_sources(xbox_input PRIVATE android_vibration.c)
@@ -53,6 +53,10 @@ add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/input_rumble
 # The on-screen controls and their merge into port 0 (every host, pure).
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/input_touch
                  ${CMAKE_CURRENT_BINARY_DIR}/input_touch)
+# A racing wheel as a port-0 pad: bindings, steering and pedal maths, the
+# merge (every host, pure).
+add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/input_wheel
+                 ${CMAKE_CURRENT_BINARY_DIR}/input_wheel)
 # The key map and its README table (every host, no SDL), and the SDL key
 # and focus rules against synthetic events (POSIX).
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../tests/input_keyboard

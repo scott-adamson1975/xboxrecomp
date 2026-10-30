@@ -23,6 +23,7 @@
 #include "pad_glyphs.h"
 #include "rumble_curve.h"
 #include "touch_pad.h"
+#include "wheel_pad.h"
 #include "recomp_env.h"
 
 #include <errno.h>
@@ -271,6 +272,10 @@ void xbox_InputSetRumbleGate(unsigned off, unsigned on)
 }
 
 static int rumble_muted(void) { return g_blocked || g_background || g_shutdown; }
+
+/* Whether a host output (rumble, a wheel's force) must be silent now: the
+ * overlay is open, the window is not in front, or the run is ending. */
+int xbox_InputOutputMuted(void) { return rumble_muted(); }
 
 static WORD rumble_word(double level)
 {
@@ -559,6 +564,21 @@ void xbox_InputSetBackend(const xbox_input_backend *b)
     RUMBLE_UNLOCK();
 }
 
+/* The wheel's reader (wheel_pad.h), set by wheel_sdl.c; NULL: no wheel. The
+ * packet counter moves only when the wheel's state does. */
+static xbox_wheel_read_fn g_wheel_read;
+static DWORD g_wheel_packet;
+static XBOX_GAMEPAD g_wheel_last;
+
+static xbox_wheel_car_fn g_wheel_car;
+void xbox_InputWheelSetCarSource(xbox_wheel_car_fn fn) { g_wheel_car = fn; }
+xbox_wheel_car_fn xbox_InputWheelCarSource(void) { return g_wheel_car; }
+
+void xbox_InputWheelSetReader(xbox_wheel_read_fn fn)
+{
+    g_wheel_read = fn;
+}
+
 DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
 {
     XBOX_INPUT_STATE kb, tp;
@@ -629,6 +649,30 @@ DWORD xbox_InputGetState(DWORD dwPort, XBOX_INPUT_STATE *pState)
             /* Either one moving moves the number: the sum of the two
              * counters, both of which only go up. */
             pState->dwPacketNumber += tp.dwPacketNumber;
+        }
+    }
+    /* A racing wheel answers for port 0 when one is configured (wheel_pad.h),
+     * merged like the keys: a trigger the larger, the stick set by the wheel
+     * while it is off centre. With no pad it is the port's whole state. */
+    if (dwPort == 0 && g_wheel_read) {
+        XBOX_GAMEPAD wg;
+
+        if (g_wheel_read(&wg)) {
+            if (xbox_wheel_active(&wg))
+                src |= XBOX_INPUT_SRC_WHEEL;
+            if (memcmp(&wg, &g_wheel_last, sizeof wg)) {
+                g_wheel_last = wg;
+                g_wheel_packet++;
+            }
+            if (rc != ERROR_SUCCESS) {
+                memset(pState, 0, sizeof *pState);
+                pState->Gamepad = wg;
+                rc = ERROR_SUCCESS;
+            } else {
+                xbox_wheel_merge(&pState->Gamepad, &wg);
+            }
+            /* Edges are recorded by the packet number (see the keys). */
+            pState->dwPacketNumber += g_wheel_packet;
         }
     }
     g_sources[dwPort] = src;
