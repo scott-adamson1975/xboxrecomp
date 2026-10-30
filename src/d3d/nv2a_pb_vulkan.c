@@ -6129,6 +6129,17 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         float sk = 0.0f;
         int eyes = stereo_for(rt, &sk) ? 2 : 1, e;
 
+        if (eyes == 2) {
+            static int dbg = -1, nd;
+
+            if (dbg < 0)
+                dbg = getenv("RECOMP_STEREO_DEBUG") != NULL;
+            if (dbg && nd < 1200 && (nd++ % 3) == 0)
+                fprintf(stderr, LOGP "stereo draw %d: rt 0x%08X %ux%u host %ux%u, %s, %u verts, scissor %d,%d %ux%u, reads rt %s\n", nd,
+                        rt->offset, rt->w, rt->h, rt->hw, rt->hh, d->program ? "program" : "pass-through", count,
+                        draw_sr.offset.x, draw_sr.offset.y, draw_sr.extent.width, draw_sr.extent.height,
+                        rt_pass ? "yes" : "no");
+        }
         if (eyes == 2 && rt_pass) {
             /* A pre-transformed batch that reads a full-size picture (the title's own pass over its finished picture: a copy
              * back, a fade): the picture already holds both eyes, so it goes across the whole surface once. Drawn per eye
