@@ -32,6 +32,11 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
+#if !defined(_WIN32)
+#include <unistd.h>
+#endif
+#include <stdlib.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -290,6 +295,15 @@ static const char *const *hk_device_extensions(unsigned *n)
 static const struct nvk_create_hooks s_hooks_d3d = { NULL, hk_physical_device_d3d, NULL, hk_device_extensions };
 #endif
 
+static void wait_one_second(void)
+{
+#if defined(_WIN32)
+    Sleep(1000);
+#else
+    sleep(1);
+#endif
+}
+
 int xbox_VrInit(void)
 {
     XrInstanceCreateInfo ci;
@@ -297,7 +311,10 @@ int xbox_VrInit(void)
     XrSystemProperties sp;
     const char *ext;
     const char *api = getenv("RECOMP_VR_API");
+    const char *wait_s = getenv("RECOMP_VR_WAIT");
     XrResult r;
+    time_t deadline;
+    int waited = 0;
 
     if (X.inited)
         return X.ok;
@@ -330,7 +347,15 @@ int xbox_VrInit(void)
     snprintf(ci.applicationInfo.engineName, sizeof ci.applicationInfo.engineName, "xboxrecomp");
     ci.enabledExtensionCount = 1;
     ci.enabledExtensionNames = &ext;
+    deadline = time(NULL) + (wait_s ? atoi(wait_s) : 300);       /* RECOMP_VR_WAIT seconds, default 300 */
     r = p_xrCreateInstance(&ci, &X.inst);
+    while (XR_FAILED(r) && time(NULL) < deadline) {                /* SteamVR not up yet: wait for it */
+        if (!waited++)
+            fprintf(stderr, VRLOG "no OpenXR runtime yet (%d): waiting for it (start SteamVR), up to %s s\n", (int)r,
+                    wait_s ? wait_s : "300");
+        wait_one_second();
+        r = p_xrCreateInstance(&ci, &X.inst);
+    }
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrCreateInstance: %d (no OpenXR runtime, or it lacks %s): VR off\n", (int)r, ext);
         return 0;
@@ -353,6 +378,15 @@ int xbox_VrInit(void)
     gi.type = XR_TYPE_SYSTEM_GET_INFO;
     gi.formFactor = XR_FORM_FACTOR_HEAD_MOUNTED_DISPLAY;
     r = p_xrGetSystem(X.inst, &gi, &X.sys);
+    while (XR_FAILED(r) && time(NULL) < deadline) {                /* the headset is not ready: wait for it */
+        if (!waited++)
+            fprintf(stderr, VRLOG "no headset yet (%s): waiting for it (put it on, wake it), up to %s s\n", rs(r),
+                    wait_s ? wait_s : "300");
+        wait_one_second();
+        r = p_xrGetSystem(X.inst, &gi, &X.sys);
+    }
+    if (waited && XR_SUCCEEDED(r))
+        fprintf(stderr, VRLOG "the headset is there\n");
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "no headset: %s (connect it and start the runtime: SteamVR): VR off\n", rs(r));
         return 0;
