@@ -6140,6 +6140,23 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
                         draw_sr.offset.x, draw_sr.offset.y, draw_sr.extent.width, draw_sr.extent.height,
                         rt_pass ? "yes" : "no");
         }
+        if (eyes == 2 && !d->program && count <= 6 && getenv("RECOMP_STEREO_DEBUG")) {
+            static int nq;
+
+            if (nq++ < 60) {
+                uint32_t qi;
+                int f;
+
+                fprintf(stderr, LOGP "stereo quad %d: nf4 %d, textured %d:", nq, nf4, 0);
+                for (qi = 0; qi < count; qi++) {
+                    fprintf(stderr, " v%u(", qi);
+                    for (f = 0; f < nf4 * 4 && f < 8; f++)
+                        fprintf(stderr, "%s%.1f", f ? " " : "", vf[(size_t)qi * nf4 * 4u + (size_t)f]);
+                    fprintf(stderr, ")");
+                }
+                fprintf(stderr, "\n");
+            }
+        }
         if (eyes == 2 && rt_pass) {
             /* A pre-transformed batch that reads a full-size picture (the title's own pass over its finished picture: a copy
              * back, a fade): the picture already holds both eyes, so it goes across the whole surface once. Drawn per eye
