@@ -89,6 +89,7 @@ int xbox_VblankDisplayLockOn(void);
 uint32_t xbox_HostFlipIntervalAsked(void);
 #include "kernel/nv2a_backend_common.h"
 #include "fb_present_vulkan.h"
+#include "oxr.h"
 #include "../platform/xr_log.h"   /* the print gate (also force-included) */
 
 #define LOGP "[PRESENT] "
@@ -3170,7 +3171,7 @@ static void hdr_pattern(VkCommandBuffer cb, struct nvk_image *sw)
 }
 
 int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
-                const char *shot_path, uint32_t flip)
+                const char *shot_path, uint32_t flip, uint32_t stereo)
 {
     VkCommandBuffer cb;
     VkCommandBufferBeginInfo bi;
@@ -3589,6 +3590,19 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
             }
         }
     }
+    /* A side-by-side stereo pair (--vr, oxr.c): the slot into the headset's swapchain, before the window's own submit.
+     * The slot is read only here and by the window's blit; it is in the SDR format the headset path copies raw. */
+    if (stereo && xbox_VrActive() && s_slot[k].img && s_slot[k].layout == VK_IMAGE_LAYOUT_GENERAL
+            && s_slot[k].format == VK_FORMAT_B8G8R8A8_UNORM)
+        xbox_VrPresent(C, s_slot[k].img, s_slot[k].w, s_slot[k].h, s_slot[k].format, stereo, flip);
+    else if (stereo && xbox_VrActive()) {
+        static int said;
+
+        if (said++ < 3)
+            fprintf(stderr, LOGP "VR: a stereo frame cannot go to the headset: the slot is %s (the headset path copies the"
+                    " 8-bit SDR frame; turn HDR off: RECOMP_GFX_HDR=0)%s" "\n", s_slot[k].format == HDR_SLOT_FMT ? "HDR10" : "not GENERAL or not 8-bit",
+                    "");
+    }
     nvk_queue_lock();
     r = vkQueueSubmit(C->queue, 1, &si, s_fence[s_fi]);
     if (r == VK_SUCCESS) {
@@ -3679,7 +3693,7 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
         s_kw_refill = 0;
         s_kw_tries++;
         s_keep_repeat = 1;
-        if (fbv_present(win, k, fw, fh, filter, NULL, flip))
+        if (fbv_present(win, k, fw, fh, filter, NULL, flip, 0))     /* a repeat for the window: nothing new for the headset */
             s_keep_refills++;
         s_keep_repeat = 0;
         snprintf(what, sizeof what, "switch-on refill %d, %.0f ms after the switch",
@@ -3691,7 +3705,7 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
         /* Smooth: nothing was queued; the frame goes once more, so the next
          * one waits one refresh behind it. */
         s_keep_repeat = 1;
-        if (fbv_present(win, k, fw, fh, filter, NULL, flip))
+        if (fbv_present(win, k, fw, fh, filter, NULL, flip, 0))     /* a repeat for the window: nothing new for the headset */
             s_keep_refills++;
         s_keep_repeat = 0;
         keep_corrected("queue empty, frame presented once more", flip);

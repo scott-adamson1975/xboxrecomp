@@ -32,7 +32,7 @@ else()
     endif()
     if(XBOXRECOMP_HAVE_VULKAN)
         # The window's Vulkan swapchain for the Vulkan backend.
-        target_sources(xbox_video PRIVATE fb_present_vulkan.c)
+        target_sources(xbox_video PRIVATE fb_present_vulkan.c oxr.c)
         target_link_libraries(xbox_video PUBLIC xr_vulkan)
         if(XR_VK_DYNAMIC_HOST)
             # Vulkan through vk_dyn.h's pointers (src/d3d/CMakeLists.txt).
