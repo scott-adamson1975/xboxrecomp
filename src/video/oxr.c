@@ -1177,9 +1177,9 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
                 lq.pose.position.x = s_menu_pose[4];
                 lq.pose.position.y = s_menu_pose[5];
                 lq.pose.position.z = s_menu_pose[6];
-                /* the title draws a 640 x 480 surface that a TV stretches to 16:9: so the screen is 16:9 */
-                lq.size.width = 3.2f;
-                lq.size.height = 1.8f;
+                /* 4:3 (16:9 looked squashed) */
+                lq.size.width = 2.8f;
+                lq.size.height = 2.1f;
                 layers[0] = (const XrCompositionLayerBaseHeader *)&lq;
                 have_layer = 1;
             } else {

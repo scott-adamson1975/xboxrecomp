@@ -5173,6 +5173,10 @@ static int ubo_place(int which, const void *p, uint32_t n, VkDeviceSize *off)
  * shift, +K for the left eye (a camera that moved left sees the scene shifted right) and -K for the right.
  * The title's own clears happen once for the whole surface and are not repeated. A pass-through batch (the HUD
  * and menus: pre-transformed) has no push constant in its shader and is drawn flat in each half. */
+/* The HUD (a stereo value with no eye shift) is drawn smaller in each eye's half, about its middle, so that it sits in front of
+ * the player and not at the very edge of the headset's view: RECOMP_STEREO_HUD_SCALE (default 0.6; 1 leaves it). */
+static float s_ui_s = 1.0f;
+
 static int stereo_for(const RenderTarget *rt, float *k)
 {
     uint32_t sv = nv2a_pb_stream_stereo();
@@ -5180,6 +5184,20 @@ static int stereo_for(const RenderTarget *rt, float *k)
     if (!(sv & NV2A_STEREO_ON) || rt->w < 640 || rt->h < 480)
         return 0;
     *k = nv2a_stereo_k(sv);
+    if (*k == 0.0f) {
+        static float cfg = -1.0f;
+
+        if (cfg < 0.0f) {
+            const char *e = getenv("RECOMP_STEREO_HUD_SCALE");
+
+            cfg = e ? (float)atof(e) : 0.6f;
+            if (!(cfg >= 0.2f && cfg <= 1.0f))
+                cfg = 0.6f;
+        }
+        s_ui_s = cfg;
+    } else {
+        s_ui_s = 1.0f;
+    }
     s_stereo_seen = sv;
     return 1;
 }
@@ -5195,6 +5213,14 @@ static VkRect2D stereo_rect(const RenderTarget *rt, VkRect2D sr, int eye)
     x1 = (uint32_t)((uint64_t)x1 * half / rt->hw);
     o.offset.x = (int32_t)((uint32_t)eye * half + x0);
     o.extent.width = x1 > x0 ? x1 - x0 : 1u;
+    if (s_ui_s < 1.0f) {            /* into the smaller, centred rectangle of the HUD */
+        float s = s_ui_s, cx = (float)((uint32_t)eye * half) + 0.5f * (float)half, cy = 0.5f * (float)rt->hh;
+
+        o.offset.x = (int32_t)(cx + ((float)o.offset.x - cx) * s);
+        o.extent.width = (uint32_t)((float)o.extent.width * s) + 1u;
+        o.offset.y = (int32_t)(cy + ((float)sr.offset.y - cy) * s);
+        o.extent.height = (uint32_t)((float)sr.extent.height * s) + 1u;
+    }
     return o;
 }
 
@@ -5208,6 +5234,14 @@ static void stereo_eye(const RenderTarget *rt, VkRect2D sr, int eye, float k)
     vp.y = (float)rt->hh;
     vp.width = (float)half;
     vp.height = -(float)rt->hh;
+    if (s_ui_s < 1.0f) {
+        float s = s_ui_s;
+
+        vp.x += 0.5f * (float)half * (1.0f - s);
+        vp.width = (float)half * s;
+        vp.y = 0.5f * (float)rt->hh * (1.0f + s);
+        vp.height = -(float)rt->hh * s;
+    }
     vp.minDepth = 0.0f;
     vp.maxDepth = 1.0f;
     vkCmdSetViewport(s_cmd, 0, 1, &vp);
