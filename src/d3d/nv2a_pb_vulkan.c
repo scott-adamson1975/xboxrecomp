@@ -5905,7 +5905,7 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
                 sview[k] = cube_bind(t);
             } else if ((t->mode == 3 || !stage_signed(t))
                        && (srt = rt_texture(t, rt, &sview[k], &sw, &sh)) != NULL) {
-                if (!d->program && srt->w >= 640 && srt->h >= 480)
+                if (srt->w >= 640 && srt->h >= 480)
                     rt_pass = srt;
                 if (!nv2a_tex_size_from_format(t->color)) {
                     pc.b.tex_scale[k][0] = 1.0f / (float)sw;
@@ -6158,13 +6158,13 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
             }
         }
         if (eyes == 2 && rt_pass) {
-            /* A pre-transformed batch that reads a full-size picture (the title's own pass over its finished picture: a copy
-             * back, a fade): the picture already holds both eyes, so it goes across the whole surface once. Drawn per eye
-             * it would put the pair inside each half ("stereo in stereo"). */
+            /* A batch that reads a full-size render target (the title draws the scene into an intermediate target of the main
+             * surface's size and composites it into the main one): the picture it reads already holds both eyes, so it goes
+             * across the whole surface once. Drawn per eye it would put the pair inside each half ("stereo in stereo"). */
             static int said;
 
             if (said++ < 4)
-                fprintf(stderr, LOGP "stereo: a pass-through batch reads the render target 0x%08X (%ux%u) into 0x%08X (%ux%u):"
+                fprintf(stderr, LOGP "stereo: a batch reads the render target 0x%08X (%ux%u) into 0x%08X (%ux%u):"
                         " drawn once\n", rt_pass->offset, rt_pass->w, rt_pass->h, rt->offset, rt->w, rt->h);
             eyes = 1;
         }
