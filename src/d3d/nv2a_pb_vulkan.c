@@ -5766,6 +5766,7 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
     float zbias = 0.0f, zb_applied = 0.0f;
     int zb_split = 0;                 /* BO-253: offset on the front faces only */
     VkRect2D draw_sr;                 /* the draw's scissor, for the stereo eyes */
+    RenderTarget *srt, *rt_pass = NULL; /* a render target a texture stage reads; a pass-through batch's, if full-size */
     VkCullModeFlags draw_cull = 0;    /* and its cull mode */
     VkDeviceSize uo_plain = 0;        /* the vertex constants without the offset */
     uint64_t rhash = 0;               /* BO-204 debug */
@@ -5903,7 +5904,9 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
             if (t->mode == 3 && t->cube && fmod != s_fs_basic) {   /* samplerCube */
                 sview[k] = cube_bind(t);
             } else if ((t->mode == 3 || !stage_signed(t))
-                       && rt_texture(t, rt, &sview[k], &sw, &sh) != NULL) {
+                       && (srt = rt_texture(t, rt, &sview[k], &sw, &sh)) != NULL) {
+                if (!d->program && srt->w >= 640 && srt->h >= 480)
+                    rt_pass = srt;
                 if (!nv2a_tex_size_from_format(t->color)) {
                     pc.b.tex_scale[k][0] = 1.0f / (float)sw;
                     pc.b.tex_scale[k][1] = 1.0f / (float)sh;
@@ -6126,28 +6129,18 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         float sk = 0.0f;
         int eyes = stereo_for(rt, &sk) ? 2 : 1, e;
 
-        if (eyes == 2 && !d->program && nf4 > 0 && count > 0) {
-            /* A pre-transformed batch over the whole surface is the title's own full-screen pass over the picture (a copy
-             * back of it, a fade): it covers both eyes' halves in one go. Per eye it would put the pair of pictures inside
-             * each half ("stereo in stereo"). */
-            float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
+        if (eyes == 2 && rt_pass) {
+            /* A pre-transformed batch that reads a full-size picture (the title's own pass over its finished picture: a copy
+             * back, a fade): the picture already holds both eyes, so it goes across the whole surface once. Drawn per eye
+             * it would put the pair inside each half ("stereo in stereo"). */
+            static int said;
 
-            for (i = 0; i < count; i++) {
-                const float *pv = vf + (size_t)i * nf4 * 4u;
-
-                if (pv[0] < x0) x0 = pv[0];
-                if (pv[0] > x1) x1 = pv[0];
-                if (pv[1] < y0) y0 = pv[1];
-                if (pv[1] > y1) y1 = pv[1];
-            }
-            if (x1 - x0 >= 0.95f * (float)rt->w && y1 - y0 >= 0.95f * (float)rt->h) {
-                static int said;
-
-                if (said++ < 3)
-                    fprintf(stderr, LOGP "stereo: a full-surface pass-through batch (%.0f..%.0f x %.0f..%.0f on %ux%u) drawn once\n", x0, x1, y0, y1, rt->w, rt->h);
-                eyes = 1;
-            }
+            if (said++ < 4)
+                fprintf(stderr, LOGP "stereo: a pass-through batch reads the render target 0x%08X (%ux%u) into 0x%08X (%ux%u):"
+                        " drawn once\n", rt_pass->offset, rt_pass->w, rt_pass->h, rt->offset, rt->w, rt->h);
+            eyes = 1;
         }
+
 
         for (e = 0; e < eyes; e++) {
             if (eyes == 2) {
