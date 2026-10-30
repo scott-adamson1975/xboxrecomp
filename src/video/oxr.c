@@ -72,6 +72,10 @@ static struct {
     unsigned frames;
 } X;
 
+/* The first frames log each step before it runs (stderr is unbuffered): a crash inside the runtime then names its call. */
+static unsigned s_step_n;
+#define STEP(what) do { if (s_step_n < 40) { s_step_n++; fprintf(stderr, VRLOG "step: %s\n", what); } } while (0)
+
 static const char *rs(XrResult r)
 {
     static char b[XR_MAX_RESULT_STRING_SIZE];
@@ -294,7 +298,10 @@ static int make_session(const struct nvk_core *C)
     si.type = XR_TYPE_SESSION_CREATE_INFO;
     si.next = &gb;
     si.systemId = X.sys;
+    STEP("xrCreateSession");
+    nvk_queue_lock();
     r = p_xrCreateSession(X.inst, &si, &X.sess);
+    nvk_queue_unlock();
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrCreateSession: %s\n", rs(r));
         return 0;
@@ -303,6 +310,7 @@ static int make_session(const struct nvk_core *C)
     rsi.type = XR_TYPE_REFERENCE_SPACE_CREATE_INFO;
     rsi.referenceSpaceType = XR_REFERENCE_SPACE_TYPE_VIEW;     /* head-locked, for now */
     rsi.poseInReferenceSpace.orientation.w = 1.0f;
+    STEP("xrCreateReferenceSpace");
     r = p_xrCreateReferenceSpace(X.sess, &rsi, &X.space);
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrCreateReferenceSpace: %s\n", rs(r));
@@ -334,7 +342,11 @@ static void poll_events(void)
                 memset(&bi, 0, sizeof bi);
                 bi.type = XR_TYPE_SESSION_BEGIN_INFO;
                 bi.primaryViewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO;
-                if (XR_FAILED(r = p_xrBeginSession(X.sess, &bi)))
+                STEP("xrBeginSession");
+                nvk_queue_lock();
+                r = p_xrBeginSession(X.sess, &bi);
+                nvk_queue_unlock();
+                if (XR_FAILED(r))
                     fprintf(stderr, VRLOG "xrBeginSession: %s\n", rs(r));
                 else {
                     X.running = 1;
@@ -367,6 +379,7 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     VkFenceCreateInfo fi;
     XrResult r;
 
+    STEP("xrEnumerateSwapchainFormats");
     p_xrEnumerateSwapchainFormats(X.sess, 0, &n, NULL);
     fmts = (int64_t *)calloc(n ? n : 1, sizeof *fmts);
     if (!fmts)
@@ -395,11 +408,15 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     ci.faceCount = 1;
     ci.arraySize = 1;
     ci.mipCount = 1;
+    STEP("xrCreateSwapchain");
+    nvk_queue_lock();
     r = p_xrCreateSwapchain(X.sess, &ci, &X.sc);
+    nvk_queue_unlock();
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrCreateSwapchain %ux%u: %s\n", w, h, rs(r));
         return 0;
     }
+    STEP("xrEnumerateSwapchainImages (count)");
     p_xrEnumerateSwapchainImages(X.sc, 0, &X.nimg, NULL);
     X.imgs = (XrSwapchainImageVulkan2KHR *)calloc(X.nimg, sizeof *X.imgs);
     X.cbs = (VkCommandBuffer *)calloc(X.nimg, sizeof *X.cbs);
@@ -408,6 +425,7 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
         return 0;
     for (i = 0; i < X.nimg; i++)
         X.imgs[i].type = XR_TYPE_SWAPCHAIN_IMAGE_VULKAN2_KHR;
+    STEP("xrEnumerateSwapchainImages (images)");
     r = p_xrEnumerateSwapchainImages(X.sc, X.nimg, &X.nimg, (XrSwapchainImageBaseHeader *)X.imgs);
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrEnumerateSwapchainImages: %s\n", rs(r));
@@ -417,6 +435,7 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
     pi.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
     pi.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pi.queueFamilyIndex = C->qfam;
+    STEP("the command pool, buffers and fences");
     if (vkCreateCommandPool(C->dev, &pi, NULL, &X.pool) != VK_SUCCESS)
         return 0;
     memset(&ai, 0, sizeof ai);
@@ -516,6 +535,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     wi.type = XR_TYPE_FRAME_WAIT_INFO;
     memset(&fs, 0, sizeof fs);
     fs.type = XR_TYPE_FRAME_STATE;
+    STEP("xrWaitFrame");
     r = p_xrWaitFrame(X.sess, &wi, &fs);
     if (XR_FAILED(r)) {
         fail("xrWaitFrame");
@@ -523,7 +543,10 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     }
     memset(&bgi, 0, sizeof bgi);
     bgi.type = XR_TYPE_FRAME_BEGIN_INFO;
+    STEP("xrBeginFrame");
+    nvk_queue_lock();
     r = p_xrBeginFrame(X.sess, &bgi);
+    nvk_queue_unlock();
     if (XR_FAILED(r)) {
         fprintf(stderr, VRLOG "xrBeginFrame: %s\n", rs(r));
         return;
@@ -538,19 +561,25 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
 
         memset(&ai, 0, sizeof ai);
         ai.type = XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO;
+        STEP("xrAcquireSwapchainImage");
+        nvk_queue_lock();
         r = p_xrAcquireSwapchainImage(X.sc, &ai, &idx);
+        nvk_queue_unlock();
         if (XR_SUCCEEDED(r)) {
             memset(&wsi, 0, sizeof wsi);
             wsi.type = XR_TYPE_SWAPCHAIN_IMAGE_WAIT_INFO;
             wsi.timeout = XR_INFINITE_DURATION;
+            STEP("xrWaitSwapchainImage");
             r = p_xrWaitSwapchainImage(X.sc, &wsi);
         }
+        STEP("the copy");
         if (XR_SUCCEEDED(r) && copy_frame(C, slot, idx)) {
             XrSwapchainImageReleaseInfo ri;
             int e;
 
             memset(&ri, 0, sizeof ri);
             ri.type = XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO;
+            STEP("xrReleaseSwapchainImage");
             nvk_queue_lock();
             p_xrReleaseSwapchainImage(X.sc, &ri);
             nvk_queue_unlock();
@@ -589,6 +618,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     ei.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
     ei.layerCount = have_layer ? 1u : 0u;
     ei.layers = have_layer ? layers : NULL;
+    STEP("xrEndFrame");
     nvk_queue_lock();
     r = p_xrEndFrame(X.sess, &ei);
     nvk_queue_unlock();
