@@ -6126,6 +6126,29 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         float sk = 0.0f;
         int eyes = stereo_for(rt, &sk) ? 2 : 1, e;
 
+        if (eyes == 2 && !d->program && nf4 > 0 && count > 0) {
+            /* A pre-transformed batch over the whole surface is the title's own full-screen pass over the picture (a copy
+             * back of it, a fade): it covers both eyes' halves in one go. Per eye it would put the pair of pictures inside
+             * each half ("stereo in stereo"). */
+            float x0 = 1e30f, x1 = -1e30f, y0 = 1e30f, y1 = -1e30f;
+
+            for (i = 0; i < count; i++) {
+                const float *pv = vf + (size_t)i * nf4 * 4u;
+
+                if (pv[0] < x0) x0 = pv[0];
+                if (pv[0] > x1) x1 = pv[0];
+                if (pv[1] < y0) y0 = pv[1];
+                if (pv[1] > y1) y1 = pv[1];
+            }
+            if (x1 - x0 >= 0.95f * (float)rt->w && y1 - y0 >= 0.95f * (float)rt->h) {
+                static int said;
+
+                if (said++ < 3)
+                    fprintf(stderr, LOGP "stereo: a full-surface pass-through batch (%.0f..%.0f x %.0f..%.0f on %ux%u) drawn once\n", x0, x1, y0, y1, rt->w, rt->h);
+                eyes = 1;
+            }
+        }
+
         for (e = 0; e < eyes; e++) {
             if (eyes == 2) {
                 stereo_eye(rt, draw_sr, e, d->program ? (e ? -sk : sk) : 0.0f);
