@@ -285,6 +285,21 @@ void nv2a_pb_stream_mark(uint32_t va, uint32_t tag);
 uint32_t nv2a_pb_stream_tag(void);
 void nv2a_pb_stream_tag_set(uint32_t tag);
 
+/* The stereo channel: a second value that travels the same way (a host's VR or 3D mode). A mark whose tag has bit 31
+ * set is a stereo mark: the value is the tag's other 31 bits and the HDR tag above is left alone. 0 (the start, and
+ * after nv2a_pb_stream_stereo_set(0)) is mono. NV2A_STEREO_ON (bit 30) says that the picture is drawn once per eye,
+ * the left eye in the left half of the surface and the right in the right half, each squeezed to half its width; the
+ * low 30 bits are the shift of the left eye's image in clip space, in millionths (the right eye's is the same, the
+ * other way): K = P00 * ipd / 2 for a camera whose view-space x maps to clip x with the scale P00. A host draws
+ * the scene (the shift K) and its 2D (shift 0, the HUD at screen depth) through the same value: it marks again at the
+ * change. */
+#define NV2A_STEREO_MARK  0x80000000u
+#define NV2A_STEREO_ON    0x40000000u
+#define NV2A_STEREO_K_MASK 0x3FFFFFFFu
+void nv2a_pb_stream_mark_stereo(uint32_t va, uint32_t value);
+uint32_t nv2a_pb_stream_stereo(void);
+void nv2a_pb_stream_stereo_set(uint32_t value);
+
 /* A host's own work at every flip (a title's debug monitor: Burnout 3's
  * BO3_HUD_MON walks its 2D scenes): `fn` is called on the thread that
  * executes the flip, the guest's, after the frame was presented and the

@@ -584,6 +584,11 @@ static void ensure_cmd(void)
     if (!s_cmd) {
         s_cmd = cb_new();
         s_dyn_valid = 0;
+        if (s_cmd && s_playout) {
+            float zero = 0.0f;
+
+            vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &zero);
+        }
         if (s_cmd)
             texup_cmd_begin(s_cmd);   /* BO-245: the frame's GPU time */
         if (s_vf && s_vf_qp && s_cmd && s_vf->nts < VF_TS) {
@@ -1526,6 +1531,10 @@ static struct {
     uint32_t      st;
 } s_zpend;
 
+/* The stereo helpers (below, before draw_scissor). */
+static int stereo_for(const RenderTarget *rt, float *k);
+static VkRect2D stereo_rect(const RenderTarget *rt, VkRect2D sr, int eye);
+
 static void zpend_flush(void)
 {
     if (s_zpend.rt) {
@@ -1581,12 +1590,25 @@ static void vk_on_clear(uint32_t param)
     cr.layerCount = 1;
     if (!cr.rect.extent.width || !cr.rect.extent.height)
         return;
-    if (s_occ_slot >= 0) {
-        occ_pass_end();
-        vkCmdClearAttachments(s_cmd, 1, &ca, 1, &cr);
-        occ_query_begin();
-    } else {
-        vkCmdClearAttachments(s_cmd, 1, &ca, 1, &cr);
+    {
+        float sk;
+        VkClearRect two[2];
+        uint32_t nrect = 1;
+
+        two[0] = cr;
+        if (stereo_for(rt, &sk)) {      /* both eyes' halves (their rectangles in the half each) */
+            two[0].rect = stereo_rect(rt, cr.rect, 0);
+            two[1] = cr;
+            two[1].rect = stereo_rect(rt, cr.rect, 1);
+            nrect = 2;
+        }
+        if (s_occ_slot >= 0) {
+            occ_pass_end();
+            vkCmdClearAttachments(s_cmd, 1, &ca, nrect, two);
+            occ_query_begin();
+        } else {
+            vkCmdClearAttachments(s_cmd, 1, &ca, nrect, two);
+        }
     }
     s_partial_clears++;
 }
@@ -1818,7 +1840,7 @@ static VkShaderModule vs_build(const uint32_t *slots, int n, uint32_t hash, uint
 
     snprintf(what, sizeof what, "program %08X", hash);
     d3d8_vsh_parse(slots, n, parsed);
-    if (d3d8_vsh_generate_glsl(parsed, D3D8_GLSL_SCREEN_SPACE, glsl, 65536) <= 0) {
+    if (d3d8_vsh_generate_glsl(parsed, D3D8_GLSL_SCREEN_SPACE | D3D8_GLSL_EYE_PC, glsl, 65536) <= 0) {
         COUNT(s_compile_errors);
         fprintf(stderr, LOGP "%s: no GLSL\n", what);
     } else if ((m = module_from_glsl(NVK_STAGE_VERTEX, glsl, what)) != VK_NULL_HANDLE) {
@@ -5137,6 +5159,67 @@ static int ubo_place(int which, const void *p, uint32_t n, VkDeviceSize *off)
 
 /* Metal's draw_scissor: the surface clip, clamped to rt, in host pixels
  * (xemu scissors every draw to it, pgraph/gl/draw.c). */
+/* ---- stereo: a picture drawn once per eye (nv2a_pb_state.h's stereo channel) ---------------
+ *
+ * With NV2A_STEREO_ON in the stream's stereo value, each draw to the main surface (640 x 480 or more: the
+ * view's target, not a reflection or an effect's small one) is issued twice: the left eye in the left half of the
+ * target and the right eye in the right half, each squeezed to half its width ("half side by side"). The
+ * viewport is the half and the scissor is mapped into it; the vertex stage's push constant is the eye's clip x
+ * shift, +K for the left eye (a camera that moved left sees the scene shifted right) and -K for the right.
+ * The title's own clears happen once for the whole surface and are not repeated. A pass-through batch (the HUD
+ * and menus: pre-transformed) has no push constant in its shader and is drawn flat in each half. */
+static int stereo_for(const RenderTarget *rt, float *k)
+{
+    uint32_t sv = nv2a_pb_stream_stereo();
+
+    if (!(sv & NV2A_STEREO_ON) || rt->w < 640 || rt->h < 480)
+        return 0;
+    *k = (float)(sv & NV2A_STEREO_K_MASK) * 1e-6f;
+    return 1;
+}
+
+/* The scissor rectangle `sr` (host pixels, the whole surface) in eye `eye`'s half. */
+static VkRect2D stereo_rect(const RenderTarget *rt, VkRect2D sr, int eye)
+{
+    uint32_t half = rt->hw / 2u;
+    uint32_t x0 = (uint32_t)sr.offset.x, x1 = x0 + sr.extent.width;
+    VkRect2D o = sr;
+
+    x0 = (uint32_t)((uint64_t)x0 * half / rt->hw);
+    x1 = (uint32_t)((uint64_t)x1 * half / rt->hw);
+    o.offset.x = (int32_t)((uint32_t)eye * half + x0);
+    o.extent.width = x1 > x0 ? x1 - x0 : 1u;
+    return o;
+}
+
+static void stereo_eye(const RenderTarget *rt, VkRect2D sr, int eye, float k)
+{
+    uint32_t half = rt->hw / 2u;
+    VkViewport vp;
+    VkRect2D r = stereo_rect(rt, sr, eye);
+
+    vp.x = (float)((uint32_t)eye * half);
+    vp.y = (float)rt->hh;
+    vp.width = (float)half;
+    vp.height = -(float)rt->hh;
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+    vkCmdSetViewport(s_cmd, 0, 1, &vp);
+    vkCmdSetScissor(s_cmd, 0, 1, &r);
+    vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &k);
+}
+
+/* After the eyes: the shift back to 0 and the cached viewport and scissor forgotten, so the next draw sets them. */
+static void stereo_done(void)
+{
+    float zero = 0.0f;
+
+    vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &zero);
+    s_dyn.vw = 0;
+    s_dyn.vh = 0;
+    memset(&s_dyn.sr, 0xFF, sizeof s_dyn.sr);
+}
+
 static int draw_scissor(const struct nv2a_pb_gpu *g, const RenderTarget *rt, VkRect2D *sr)
 {
     uint32_t x0 = g->clip_x, y0 = g->clip_y;
@@ -5676,6 +5759,8 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
     int cull = 0, cull_all = 0, tries;
     float zbias = 0.0f, zb_applied = 0.0f;
     int zb_split = 0;                 /* BO-253: offset on the front faces only */
+    VkRect2D draw_sr;                 /* the draw's scissor, for the stereo eyes */
+    VkCullModeFlags draw_cull = 0;    /* and its cull mode */
     VkDeviceSize uo_plain = 0;        /* the vertex constants without the offset */
     uint64_t rhash = 0;               /* BO-204 debug */
     const Stage *rstage = NULL;
@@ -5965,6 +6050,7 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         n.vw = rt->hw;
         n.vh = rt->hh;
         n.sr = sr;
+        draw_sr = sr;
         n.front = v->front_face != 0x900 ? VK_FRONT_FACE_COUNTER_CLOCKWISE
                                          : VK_FRONT_FACE_CLOCKWISE;
         n.cull = zb_split ? VK_CULL_MODE_BACK_BIT
@@ -6019,6 +6105,7 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
 #undef DYN
         s_dyn = n;
         s_dyn_valid = 1;
+        draw_cull = n.cull;
     }
     dyn_off[0] = (uint32_t)uo[0];
     dyn_off[1] = (uint32_t)uo[1];
@@ -6029,14 +6116,35 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
                             &tset, 0, NULL);
     vkCmdBindVertexBuffers(s_cmd, 0, 1, &s_ring[RING_VB].buf, &vb_off);
     vkCmdBindIndexBuffer(s_cmd, s_ring[RING_IB].buf, ib_off, VK_INDEX_TYPE_UINT32);
-    vkCmdDrawIndexed(s_cmd, nidx, 1, 0, 0, 0);
-    if (zb_split) {
-        dyn_off[1] = (uint32_t)uo_plain;
-        vkCmdBindDescriptorSets(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_playout, 0, 1,
-                                &s_set0, 3, dyn_off);
-        vkCmdSetCullMode(s_cmd, VK_CULL_MODE_FRONT_BIT);
-        s_dyn.cull = VK_CULL_MODE_FRONT_BIT;
-        vkCmdDrawIndexed(s_cmd, nidx, 1, 0, 0, 0);
+    {
+        float sk = 0.0f;
+        int eyes = stereo_for(rt, &sk) ? 2 : 1, e;
+
+        for (e = 0; e < eyes; e++) {
+            if (eyes == 2) {
+                stereo_eye(rt, draw_sr, e, d->program ? (e ? -sk : sk) : 0.0f);
+                if (e) {        /* the first eye's second (zb_split) draw changed these */
+                    dyn_off[1] = (uint32_t)uo[1];
+                    vkCmdBindDescriptorSets(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_playout, 0, 1,
+                                            &s_set0, 3, dyn_off);
+                    vkCmdSetCullMode(s_cmd, draw_cull);
+                }
+            }
+            vkCmdDrawIndexed(s_cmd, nidx, 1, 0, 0, 0);
+            if (zb_split) {
+                dyn_off[1] = (uint32_t)uo_plain;
+                vkCmdBindDescriptorSets(s_cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, s_playout, 0, 1,
+                                        &s_set0, 3, dyn_off);
+                vkCmdSetCullMode(s_cmd, VK_CULL_MODE_FRONT_BIT);
+                s_dyn.cull = VK_CULL_MODE_FRONT_BIT;
+                vkCmdDrawIndexed(s_cmd, nidx, 1, 0, 0, 0);
+            }
+        }
+        if (eyes == 2) {
+            stereo_done();
+            if (zb_split)
+                s_dyn.cull = VK_CULL_MODE_FRONT_BIT;
+        }
     }
     s_draws++;
     s_sn.draws++;
@@ -7768,6 +7876,13 @@ static int init(void)
     pl.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pl.setLayoutCount = 2;
     pl.pSetLayouts = s_dsl;
+    {
+        /* Stereo: the eye's clip x shift (d3d8_glsl.h's D3D8_GLSL_EYE_PC). */
+        static VkPushConstantRange eye_pcr = { VK_SHADER_STAGE_VERTEX_BIT, 0, 4 };
+
+        pl.pushConstantRangeCount = 1;
+        pl.pPushConstantRanges = &eye_pcr;
+    }
     if (vkCreatePipelineLayout(s_dev, &pl, NULL, &s_playout) != VK_SUCCESS)
         return 0;
     {

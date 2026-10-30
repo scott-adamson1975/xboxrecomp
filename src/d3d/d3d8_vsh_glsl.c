@@ -288,6 +288,8 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
         D3D8_GLSL_VPCONSTS
         D3D8_GLSL_VS_OUT
         D3D8_GLSL_SATURATE, NV2A_VS_MAX_CONSTANTS);
+    if (flags & D3D8_GLSL_EYE_PC)
+        sb_append(&sb, "layout(push_constant) uniform EyePC { float k; } eyepc;\n");
     for (i = 0, k = 0; i < NV2A_VS_MAX_INPUTS; i++)
         if (inputs & (1u << i))
             sb_append(&sb, "layout(location = %d) in vec4 v%d;\n", k++, i);
@@ -358,6 +360,9 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
     } else {
         sb_append(&sb, "    gl_Position = oPos;\n");
     }
+    /* Stereo: one eye's parallax, a constant in clip x (see D3D8_GLSL_EYE_PC). */
+    if (flags & D3D8_GLSL_EYE_PC)
+        sb_append(&sb, "    gl_Position.x += eyepc.k;\n");
     /* A point list needs PointSize written; NV2A's unwritten oPts reads 0,
      * which Vulkan leaves undefined, so it draws one pixel. */
     sb_append(&sb,

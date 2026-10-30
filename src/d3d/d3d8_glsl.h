@@ -89,8 +89,15 @@ extern "C" {
  * space and fog and specular are applied, as D3D8_MSL_SCREEN_SPACE. The clip
  * space is D3D's (y up, z 0..1): the backend flips y with a negative
  * viewport height.
+ *
+ * With D3D8_GLSL_EYE_PC (the Vulkan backend's stereo mode, nv2a_pb_state.h's stereo
+ * channel), a vertex-stage push constant `float k` is added to the position's clip x
+ * after everything else: a constant in clip space, so that after the divide by w the
+ * shift is k / w, the parallax of an eye that moved sideways. The backend pushes 0 for
+ * a mono draw.
  */
 #define D3D8_GLSL_SCREEN_SPACE 0x1
+#define D3D8_GLSL_EYE_PC       0x2
 
 int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
                            char *buf, int bufsize);
