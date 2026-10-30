@@ -50,6 +50,10 @@ int  xbox_VrPose(xbox_vr_pose *out);
 /* The player recentred their view: the menu screen is put in front of them again. */
 void xbox_VrRecentre(void);
 
+/* The field of view the picture drawn from pose `id` really has (tangents of the half angles, from the camera's view window),
+ * which the layer must claim: a claim that differs from the drawn frustum stretches the picture. Replaces the pose's vwx, vwy. */
+void xbox_VrFrame(unsigned id, float vwx, float vwy);
+
 /* The end of the run. */
 void xbox_VrShutdown(void);
 
