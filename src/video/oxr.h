@@ -47,6 +47,9 @@ typedef struct xbox_vr_pose {
 } xbox_vr_pose;
 int  xbox_VrPose(xbox_vr_pose *out);
 
+/* The player recentred their view: the menu screen is put in front of them again. */
+void xbox_VrRecentre(void);
+
 /* The end of the run. */
 void xbox_VrShutdown(void);
 
