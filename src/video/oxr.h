@@ -34,6 +34,19 @@ int  xbox_VrActive(void);
 void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t h, VkFormat fmt, uint32_t stereo,
                     uint32_t flip);
 
+/* The head, for the game's camera (any thread). The latest pose the headset gave, in the runtime's LOCAL space (right-handed:
+ * +x right, +y up, -z forward). `id` (1..255, cycling) names it: the game puts it in the stereo value of the picture it draws
+ * from it, and the frame is shown with exactly that pose. vwx and vwy are the tangents of the half field of view the headset
+ * wants the picture drawn with (symmetric, the wider of its two sides). Returns 0 before the first pose. */
+typedef struct xbox_vr_pose {
+    float    q[4];          /* the head's orientation: x, y, z, w */
+    float    p[3];          /* its position, metres */
+    float    ipd;           /* the eyes' separation, metres */
+    float    vwx, vwy;      /* tan of the half field of view, horizontal and vertical */
+    unsigned id;
+} xbox_vr_pose;
+int  xbox_VrPose(xbox_vr_pose *out);
+
 /* The end of the run. */
 void xbox_VrShutdown(void);
 

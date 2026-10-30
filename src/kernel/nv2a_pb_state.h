@@ -296,18 +296,17 @@ void nv2a_pb_stream_tag_set(uint32_t tag);
 #define NV2A_STEREO_MARK  0x80000000u
 #define NV2A_STEREO_ON    0x40000000u
 #define NV2A_STEREO_K_MASK 0x3FFFFFFFu     /* the whole payload, below */
-/* The payload: K (12 bits, in units of 2e-5, up to 0.082), the camera's view window half width vw.x (9 bits, in
- * 1/128, up to 3.99) and half height vw.y (same). The view window gives the field of view a headset layer needs
- * (tan of the half angles); K = P00 * ipd / 2 with P00 = 1 / vw.x. */
-static inline uint32_t nv2a_stereo_pack(float k, float vwx, float vwy)
+/* The payload: K (12 bits, in units of 2e-5, up to 0.082) and a pose id (8 bits): which of the host's recent head poses
+ * the picture was drawn from (0: none), so that the host shows the frame with that pose. K = P00 * ipd / 2 with P00 =
+ * 1 / (the camera's view window half width). */
+static inline uint32_t nv2a_stereo_pack(float k, unsigned pose_id)
 {
-    uint32_t a = (uint32_t)(k / 2e-5f + 0.5f), b = (uint32_t)(vwx * 128.0f + 0.5f), c = (uint32_t)(vwy * 128.0f + 0.5f);
+    uint32_t a = (uint32_t)(k / 2e-5f + 0.5f);
 
-    return NV2A_STEREO_ON | (a > 4095u ? 4095u : a) << 18 | (b > 511u ? 511u : b) << 9 | (c > 511u ? 511u : c);
+    return NV2A_STEREO_ON | (a > 4095u ? 4095u : a) << 18 | (pose_id & 0xFFu) << 10;
 }
-static inline float nv2a_stereo_k(uint32_t v)   { return (float)((v >> 18) & 0xFFFu) * 2e-5f; }
-static inline float nv2a_stereo_vwx(uint32_t v) { return (float)((v >> 9) & 0x1FFu) / 128.0f; }
-static inline float nv2a_stereo_vwy(uint32_t v) { return (float)(v & 0x1FFu) / 128.0f; }
+static inline float nv2a_stereo_k(uint32_t v)       { return (float)((v >> 18) & 0xFFFu) * 2e-5f; }
+static inline unsigned nv2a_stereo_pose(uint32_t v) { return (v >> 10) & 0xFFu; }
 void nv2a_pb_stream_mark_stereo(uint32_t va, uint32_t value);
 uint32_t nv2a_pb_stream_stereo(void);
 void nv2a_pb_stream_stereo_set(uint32_t value);
