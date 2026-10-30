@@ -116,6 +116,19 @@ static void *sym(const char *name)
 
 /* ---- Vulkan creation, through the runtime ------------------------------------------------------- */
 
+/* The function lookup the runtime is given. It calls vkCreateInstance and vkCreateDevice itself, with the create info
+ * it has added to; those two must be the toolkit's own (vk_dyn.h: on Windows and Linux the Vulkan loader is opened at
+ * run time and the instance's and the device's function pointers are loaded by those two wrappers: with the loader's
+ * bare ones the next Vulkan call finds a null pointer). Everything else is the loader's. */
+static VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL oxr_gipa(VkInstance instance, const char *name)
+{
+    if (!strcmp(name, "vkCreateInstance"))
+        return (PFN_vkVoidFunction)vkCreateInstance;
+    if (instance != VK_NULL_HANDLE && !strcmp(name, "vkCreateDevice"))
+        return (PFN_vkVoidFunction)vkCreateDevice;
+    return vkGetInstanceProcAddr(instance, name);
+}
+
 static VkResult hk_create_instance(const VkInstanceCreateInfo *ci, VkInstance *out)
 {
     XrVulkanInstanceCreateInfoKHR xi;
@@ -125,7 +138,7 @@ static VkResult hk_create_instance(const VkInstanceCreateInfo *ci, VkInstance *o
     memset(&xi, 0, sizeof xi);
     xi.type = XR_TYPE_VULKAN_INSTANCE_CREATE_INFO_KHR;
     xi.systemId = X.sys;
-    xi.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
+    xi.pfnGetInstanceProcAddr = oxr_gipa;
     xi.vulkanCreateInfo = ci;
     r = p_xrCreateVulkanInstanceKHR(X.inst, &xi, out, &vr);
     if (XR_FAILED(r)) {
@@ -164,7 +177,7 @@ static VkResult hk_create_device(VkPhysicalDevice pd, const VkDeviceCreateInfo *
     memset(&di, 0, sizeof di);
     di.type = XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR;
     di.systemId = X.sys;
-    di.pfnGetInstanceProcAddr = vkGetInstanceProcAddr;
+    di.pfnGetInstanceProcAddr = oxr_gipa;
     di.vulkanPhysicalDevice = pd;
     di.vulkanCreateInfo = ci;
     r = p_xrCreateVulkanDeviceKHR(X.inst, &di, out, &vr);
