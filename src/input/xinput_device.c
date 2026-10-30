@@ -13,6 +13,7 @@
 #include "recomp_env.h"
 #include "input_map.h"
 #include "keyboard.h"
+#include "wheel_pad.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -124,6 +125,7 @@ static uint64_t g_last_on_ms;
  * racing to pump. */
 static volatile int g_main_pump;
 void xbox_InputSetMainPump(int on) { g_main_pump = on; }
+int xbox_InputMainPumpActive(void) { return g_main_pump; }
 
 /* Whether a controller is open, i.e. whether SDL may still be in use here. */
 int xbox_InputAnyOpen(void)
@@ -244,7 +246,8 @@ static void pad_open_index(int i)
     int k, free_k = -1;
     char d[160];
 
-    if (!SDL_IsGameController(i))
+    if (!SDL_IsGameController(i)
+        || xbox_InputWheelClaims(SDL_JoystickGetDeviceVendor(i), SDL_JoystickGetDeviceProduct(i)))
         return;
     for (k = 0; k < PAD_OPEN_MAX; k++) {
         if (g_open[k].c && g_open[k].id == id)
@@ -401,7 +404,8 @@ static void open_controllers(void)
     if (g_pads_closed)
         return;
     for (int i = 0; i < SDL_NumJoysticks() && slot < XBOX_MAX_CONTROLLERS; i++) {
-        if (!SDL_IsGameController(i))
+        if (!SDL_IsGameController(i)
+            || xbox_InputWheelClaims(SDL_JoystickGetDeviceVendor(i), SDL_JoystickGetDeviceProduct(i)))
             continue;
         if (!g_pads[slot])
             g_pads[slot] = SDL_GameControllerOpen(i);
@@ -415,6 +419,7 @@ static void sdl_init(void)
     SDL_SetHint(SDL_HINT_NO_SIGNAL_HANDLERS, "1");
     if (!SDL_WasInit(SDL_INIT_GAMECONTROLLER))
         SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER);
+    xbox_InputWheelInit();
 #if defined(__ANDROID__)
     {
         /* RECOMP_ANDROID_VIBRATION_FLOOR=<0..65535>: the title's motor
@@ -545,6 +550,8 @@ static void sdl_shutdown(void)
 {
     SDL_GameController *all[PAD_OPEN_MAX + XBOX_MAX_CONTROLLERS];
     int n = 0, recent = 0;
+
+    xbox_InputWheelShutdown();              /* the wheel's force off first, before anything is let go */
 
     pthread_mutex_lock(&g_pads_lock);
     g_pads_closed = 1;
