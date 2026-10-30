@@ -198,7 +198,7 @@ static int make_device(void)
     uint32_t npd = 8, i, best_q = 0, navail = 0, ne = 0;
     int best = -1;
     VkExtensionProperties *avail;
-    const char *exts[16];
+    const char *exts[24];
     VkPhysicalDevicePresentIdFeaturesKHR pid, have_pid;
     VkPhysicalDevicePresentWaitFeaturesKHR pw, have_pw;
     int want_pw = 0;
@@ -255,6 +255,14 @@ static int make_device(void)
     vkEnumerateDeviceExtensionProperties(s_core.phys, NULL, &navail, avail);
     if (s_core.surface)
         exts[ne++] = VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+    if (s_hooks && s_hooks->device_extensions) {     /* the host's (the headset path's external memory) */
+        unsigned hn = 0, hi;
+        const char *const *hx = s_hooks->device_extensions(&hn);
+
+        for (hi = 0; hx && hi < hn && ne < 12; hi++)
+            if (has_ext(avail, navail, hx[hi]))
+                exts[ne++] = hx[hi];
+    }
     /* A portability implementation's subset must be enabled when listed. */
     if (has_ext(avail, navail, "VK_KHR_portability_subset")) {
         exts[ne++] = "VK_KHR_portability_subset";
