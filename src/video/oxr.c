@@ -796,6 +796,8 @@ static int make_swapchain(const struct nvk_core *C, uint32_t w, uint32_t h)
 
 /* The raw copy of the frame: into the runtime's Vulkan image `idx` (the Vulkan back end), or into the shared texture (the
  * Direct3D 11 back end, copied on into the runtime's image afterwards by the caller). Submitted; with `wait`, waited for. */
+static VkImageLayout s_slot_layout = VK_IMAGE_LAYOUT_GENERAL;     /* the frame's layout (an anti-aliased one is a transfer source) */
+
 static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx, int wait)
 {
     VkCommandBuffer cb = X.cbs[idx];
@@ -823,7 +825,7 @@ static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx, int 
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     vkBeginCommandBuffer(cb, &bi);
-    nvk_image_barrier(cb, slot, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
+    nvk_image_barrier(cb, slot, VK_IMAGE_ASPECT_COLOR_BIT, s_slot_layout, s_slot_layout);
     nvk_image_barrier(cb, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     memset(&ic, 0, sizeof ic);
     ic.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -832,7 +834,7 @@ static int copy_frame(const struct nvk_core *C, VkImage slot, uint32_t idx, int 
     ic.extent.width = X.sw;
     ic.extent.height = X.sh;
     ic.extent.depth = 1;
-    vkCmdCopyImage(cb, slot, VK_IMAGE_LAYOUT_GENERAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
+    vkCmdCopyImage(cb, slot, s_slot_layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
     nvk_image_barrier(cb, dst, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, end_layout);
     vkEndCommandBuffer(cb);
     memset(&si, 0, sizeof si);
@@ -942,8 +944,8 @@ static int copy_eyes(uint32_t w, uint32_t h)
 }
 #endif
 
-void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t h, VkFormat fmt, uint32_t stereo,
-                    uint32_t flip)
+void xbox_VrPresent(const struct nvk_core *C, VkImage slot, VkImageLayout slot_layout, uint32_t w, uint32_t h, VkFormat fmt,
+                    uint32_t stereo, uint32_t flip)
 {
     XrFrameWaitInfo wi;
     XrFrameState fs;
@@ -963,6 +965,7 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t
     memset(&pose, 0, sizeof pose);
     (void)fmt;
     (void)flip;
+    s_slot_layout = slot_layout;
     if (!xbox_VrActive() || !C || !w || !h)
         return;
     menu = !(stereo & NV2A_STEREO_ON);       /* menus and loading: the whole picture on a screen in front of the player */
@@ -1273,10 +1276,10 @@ int xbox_VrInit(void)
     return 0;
 }
 int xbox_VrActive(void) { return 0; }
-void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t h, VkFormat fmt, uint32_t stereo,
-                    uint32_t flip)
+void xbox_VrPresent(const struct nvk_core *C, VkImage slot, VkImageLayout slot_layout, uint32_t w, uint32_t h, VkFormat fmt,
+                    uint32_t stereo, uint32_t flip)
 {
-    (void)C; (void)slot; (void)w; (void)h; (void)fmt; (void)stereo; (void)flip;
+    (void)C; (void)slot; (void)slot_layout; (void)w; (void)h; (void)fmt; (void)stereo; (void)flip;
 }
 void xbox_VrRecentre(void) {}
 void xbox_VrFrame(unsigned id, float vwx, float vwy) { (void)id; (void)vwx; (void)vwy; }
