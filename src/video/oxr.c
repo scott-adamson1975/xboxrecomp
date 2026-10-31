@@ -1181,8 +1181,19 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, VkImageLayout slot_l
                 lq.pose.position.y = s_menu_pose[5];
                 lq.pose.position.z = s_menu_pose[6];
                 /* between 4:3 (a little tall) and 16:9 (squashed): 3:2 */
-                lq.size.width = 2.9f;
-                lq.size.height = 1.93f;
+                {
+                    static float aspect;
+
+                    if (aspect <= 0.0f) {                      /* RECOMP_VR_MENU_ASPECT: width / height, default 1.42 */
+                        const char *e = getenv("RECOMP_VR_MENU_ASPECT");
+
+                        aspect = e ? (float)atof(e) : 1.42f;
+                        if (!(aspect > 1.0f && aspect < 2.5f))
+                            aspect = 1.42f;
+                    }
+                    lq.size.width = 2.9f;
+                    lq.size.height = 2.9f / aspect;
+                }
                 layers[0] = (const XrCompositionLayerBaseHeader *)&lq;
                 have_layer = 1;
             } else {
