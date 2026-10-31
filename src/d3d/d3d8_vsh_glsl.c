@@ -289,7 +289,7 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
         D3D8_GLSL_VS_OUT
         D3D8_GLSL_SATURATE, NV2A_VS_MAX_CONSTANTS);
     if (flags & D3D8_GLSL_EYE_PC)
-        sb_append(&sb, "layout(push_constant) uniform EyePC { float k; } eyepc;\n");
+        sb_append(&sb, "layout(push_constant) uniform EyePC { float k; float ui; } eyepc;\n");
     for (i = 0, k = 0; i < NV2A_VS_MAX_INPUTS; i++)
         if (inputs & (1u << i))
             sb_append(&sb, "layout(location = %d) in vec4 v%d;\n", k++, i);
@@ -362,7 +362,13 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
     }
     /* Stereo: one eye's parallax, a constant in clip x (see D3D8_GLSL_EYE_PC). */
     if (flags & D3D8_GLSL_EYE_PC)
-        sb_append(&sb, "    gl_Position.x += eyepc.k;\n");
+        sb_append(&sb, "    gl_Position.x += eyepc.k;\n"
+                       /* the HUD (ui > 0): pulled in toward the middle, the more the farther out, so that its corners sit
+                        * on a rounder outline */
+                       "    if (eyepc.ui > 0.0 && gl_Position.w > 0.0) {\n"
+                       "        vec2 hn = gl_Position.xy / gl_Position.w;\n"
+                       "        gl_Position.xy *= 1.0 - eyepc.ui * 0.5 * dot(hn, hn);\n"
+                       "    }\n");
     /* A point list needs PointSize written; NV2A's unwritten oPts reads 0,
      * which Vulkan leaves undefined, so it draws one pixel. */
     sb_append(&sb,
