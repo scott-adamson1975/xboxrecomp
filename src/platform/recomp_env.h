@@ -130,6 +130,7 @@ extern "C" {
     X(INPUT_WHEEL_BTN_PAUSE, CONFIG, "RECOMP_WHEEL_BTN_PAUSE", NULL, "racing wheel, pause button, VID:PID:N: the game's Start") \
     X(INPUT_WHEEL_BTN_LOOKBACK, CONFIG, "RECOMP_WHEEL_BTN_LOOKBACK", NULL, "racing wheel, look back button, VID:PID:N: the game's X") \
     X(INPUT_WHEEL_BTN_VIEW, CONFIG, "RECOMP_WHEEL_BTN_VIEW", NULL, "racing wheel, change view button, VID:PID:N: the game's Y") \
+    X(INPUT_WHEEL_BTN_RECENTRE, CONFIG, "RECOMP_WHEEL_BTN_RECENTRE", NULL, "racing wheel, recentre button, VID:PID:N: the game's right stick pressed in (R3; the VR mode recentres the headset's view with it, and holding it stores the seat)") \
     X(INPUT_WHEEL_HAT, CONFIG, "RECOMP_WHEEL_HAT", NULL, "racing wheel, hat switch, VID:PID:N (N: the hat index, usually 0): the D-pad, and the left stick (a crash's aftertouch is steered with it; left and right only while the wheel is within about a quarter of full lock)") \
     X(INPUT_RUMBLE_GAIN, CONFIG, "RECOMP_INPUT_RUMBLE_GAIN", NULL, "rumble strength, 0..3: host motor = (speed / peak) ^ (1 / strength), every backend alike; 1.0 (default): the title's speeds as the console played them, 0: off, above 1: the low speeds lifted (full stays full). Under speed 800 a motor is off, and on again from 1200; a falling level lets go over about 90 ms") \
     X(INPUT_RUMBLE_PEAK, CONFIG, "RECOMP_INPUT_RUMBLE_PEAK", NULL, "the title's own full motor speed, 1..65535 (default 65535): the speed that is full on the host motor, for a title whose strongest rumble stays under 65535") \

@@ -446,6 +446,7 @@ void xbox_InputWheelInit(void)
     any |= bind_env(&g_cfg.btn[XBOX_WHEEL_BTN_PAUSE], RENV_INPUT_WHEEL_BTN_PAUSE, "RECOMP_WHEEL_BTN_PAUSE");
     any |= bind_env(&g_cfg.btn[XBOX_WHEEL_BTN_LOOKBACK], RENV_INPUT_WHEEL_BTN_LOOKBACK, "RECOMP_WHEEL_BTN_LOOKBACK");
     any |= bind_env(&g_cfg.btn[XBOX_WHEEL_BTN_VIEW], RENV_INPUT_WHEEL_BTN_VIEW, "RECOMP_WHEEL_BTN_VIEW");
+    any |= bind_env(&g_cfg.btn[XBOX_WHEEL_BTN_RECENTRE], RENV_INPUT_WHEEL_BTN_RECENTRE, "RECOMP_WHEEL_BTN_RECENTRE");
     any |= bind_env(&g_cfg.hat, RENV_INPUT_WHEEL_HAT, "RECOMP_WHEEL_HAT");
     if (!any)
         return;
