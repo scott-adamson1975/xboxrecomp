@@ -6077,6 +6077,50 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         uo[0] = s_umemo.valid[0] ? s_umemo.off[0] : 0;
     nv2a_vtx_gather(d, slot, nf4, lo, count, v->inl,
                     (const uint8_t *)xbox_GetMemoryOffset(), vf);
+    if (d->program && topo == NV2A_TOPO_TRIANGLES
+            && (nv2a_pb_stream_stereo() & (NV2A_STEREO_ON | NV2A_STEREO_NOCULL | NV2A_STEREO_HIDE))
+               == (NV2A_STEREO_ON | NV2A_STEREO_NOCULL | NV2A_STEREO_HIDE)) {
+        /* The driver: the triangles wholly inside the box (in the model's space: the first input is the position) are
+         * dropped from the list. */
+        static int dbg = -1, nlog;
+        float bx[6];
+
+        if (dbg < 0)
+            dbg = getenv("RECOMP_STEREO_DEBUG") != NULL;
+        if (nv2a_pb_stream_hide_get(bx)) {
+            uint32_t t, kept = 0, dropped = 0;
+
+            for (t = 0; t + 2 < nidx; t += 3) {
+                int in = 1, c;
+
+                for (c = 0; c < 3 && in; c++) {
+                    uint32_t vi = idx[t + c];
+                    const float *pv;
+
+                    if (vi >= count) {
+                        in = 0;
+                        break;
+                    }
+                    pv = vf + (size_t)vi * nf4 * 4u;
+                    in = pv[0] >= bx[0] && pv[0] <= bx[3] && pv[1] >= bx[1] && pv[1] <= bx[4]
+                         && pv[2] >= bx[2] && pv[2] <= bx[5];
+                }
+                if (in) {
+                    dropped++;
+                    continue;
+                }
+                if (kept != t) {
+                    idx[kept] = idx[t];
+                    idx[kept + 1] = idx[t + 1];
+                    idx[kept + 2] = idx[t + 2];
+                }
+                kept += 3;
+            }
+            if (dbg && dropped && nlog++ < 20)
+                fprintf(stderr, LOGP "car draw: %u of %u triangles in the driver box dropped\n", dropped, nidx / 3u);
+            nidx = kept;
+        }
+    }
     memcpy(ip, idx, (size_t)nidx * 4u);
     tset = texture_set(sview, ssmp);
     if (!tset) {

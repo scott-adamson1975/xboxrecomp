@@ -295,6 +295,7 @@ void nv2a_pb_stream_tag_set(uint32_t tag);
  * change. */
 #define NV2A_STEREO_MARK  0x80000000u
 #define NV2A_STEREO_ON    0x40000000u
+#define NV2A_STEREO_HIDE  0x00000002u    /* with NOCULL: the triangles wholly inside nv2a_pb_stream_hide_set's box are not drawn (a driver) */
 #define NV2A_STEREO_NOCULL 0x00000001u    /* the draws are made with both faces (a host's car body, seen from inside) */
 #define NV2A_STEREO_K_MASK 0x3FFFFFFFu     /* the whole payload, below */
 /* The payload: K (12 bits, in units of 2e-5, up to 0.082) and a pose id (8 bits): which of the host's recent head poses
@@ -309,6 +310,9 @@ static inline uint32_t nv2a_stereo_pack(float k, unsigned pose_id)
 static inline float nv2a_stereo_k(uint32_t v)       { return (float)((v >> 18) & 0xFFFu) * 2e-5f; }
 static inline unsigned nv2a_stereo_pose(uint32_t v) { return (v >> 10) & 0xFFu; }
 void nv2a_pb_stream_mark_stereo(uint32_t va, uint32_t value);
+/* The box (minx, miny, minz, maxx, maxy, maxz, in the model's own space) of the NV2A_STEREO_HIDE draws; NULL clears it. */
+void nv2a_pb_stream_hide_set(const float *box);
+int nv2a_pb_stream_hide_get(float *box);
 uint32_t nv2a_pb_stream_stereo(void);
 void nv2a_pb_stream_stereo_set(uint32_t value);
 
