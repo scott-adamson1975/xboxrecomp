@@ -367,6 +367,30 @@ void nv2a_pb_stream_mark_stereo(uint32_t va, uint32_t value)
     nv2a_pb_stream_mark(va, NV2A_STEREO_MARK | (value & ~NV2A_STEREO_MARK));
 }
 uint32_t nv2a_pb_stream_stereo(void) { return s_sm_stereo; }
+static float s_hide_box[6];
+static volatile int s_hide_on;
+void nv2a_pb_stream_hide_set(const float *box)
+{
+    int i;
+
+    if (!box) {
+        s_hide_on = 0;
+        return;
+    }
+    for (i = 0; i < 6; i++)
+        s_hide_box[i] = box[i];
+    s_hide_on = 1;
+}
+int nv2a_pb_stream_hide_get(float *box)
+{
+    int i;
+
+    if (!s_hide_on)
+        return 0;
+    for (i = 0; i < 6; i++)
+        box[i] = s_hide_box[i];
+    return 1;
+}
 void nv2a_pb_stream_stereo_set(uint32_t value) { s_sm_stereo = value & ~NV2A_STEREO_MARK; }
 void nv2a_pb_stream_tag_set(uint32_t tag) { s_sm_tag = tag; }
 
