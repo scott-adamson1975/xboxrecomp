@@ -295,6 +295,7 @@ void nv2a_pb_stream_tag_set(uint32_t tag);
  * change. */
 #define NV2A_STEREO_MARK  0x80000000u
 #define NV2A_STEREO_ON    0x40000000u
+#define NV2A_STEREO_NOCULL 0x00000001u    /* the draws are made with both faces (a host's car body, seen from inside) */
 #define NV2A_STEREO_K_MASK 0x3FFFFFFFu     /* the whole payload, below */
 /* The payload: K (12 bits, in units of 2e-5, up to 0.082) and a pose id (8 bits): which of the host's recent head poses
  * the picture was drawn from (0: none), so that the host shows the frame with that pose. K = P00 * ipd / 2 with P00 =
