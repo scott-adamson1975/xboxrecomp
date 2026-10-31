@@ -585,9 +585,9 @@ static void ensure_cmd(void)
         s_cmd = cb_new();
         s_dyn_valid = 0;
         if (s_cmd && s_playout) {
-            float zero = 0.0f;
+            float zero[2] = { 0.0f, 0.0f };
 
-            vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &zero);
+            vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 8, zero);
         }
         if (s_cmd)
             texup_cmd_begin(s_cmd);   /* BO-245: the frame's GPU time */
@@ -5176,6 +5176,7 @@ static int ubo_place(int which, const void *p, uint32_t n, VkDeviceSize *off)
 /* The HUD (a stereo value with no eye shift) is drawn smaller in each eye's half, about its middle, so that it sits in front of
  * the player and not at the very edge of the headset's view: RECOMP_STEREO_HUD_SCALE (default 0.5; 1 leaves it), its bottom edge at RECOMP_STEREO_HUD_BOTTOM (default 0.3 of the height below the middle). */
 static float s_ui_s = 1.0f;
+static float s_ui_round = 0.3f;    /* RECOMP_STEREO_HUD_ROUND: how far the HUD's corners are pulled in (the shader's eyepc.ui) */
 static float s_ui_b = 0.3f;        /* where the HUD's bottom edge sits, as a fraction of the height below the middle */
 
 static int stereo_for(const RenderTarget *rt, float *k)
@@ -5194,6 +5195,9 @@ static int stereo_for(const RenderTarget *rt, float *k)
             cfg = e ? (float)atof(e) : 0.5f;
             if (!(cfg >= 0.2f && cfg <= 1.0f))
                 cfg = 0.5f;
+            e = getenv("RECOMP_STEREO_HUD_ROUND");
+            if (e && atof(e) >= 0.0 && atof(e) < 0.8)
+                s_ui_round = (float)atof(e);
             e = getenv("RECOMP_STEREO_HUD_BOTTOM");
             if (e && atof(e) > 0.0 && atof(e) < 0.5)
                 s_ui_b = (float)atof(e);
@@ -5252,15 +5256,21 @@ static void stereo_eye(const RenderTarget *rt, VkRect2D sr, int eye, float k)
     vp.maxDepth = 1.0f;
     vkCmdSetViewport(s_cmd, 0, 1, &vp);
     vkCmdSetScissor(s_cmd, 0, 1, &r);
-    vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &k);
+    {
+        float pc[2] = { k, 0.0f };
+
+        if (s_ui_s < 1.0f)
+            pc[1] = s_ui_round;
+        vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 8, pc);
+    }
 }
 
 /* After the eyes: the shift back to 0 and the cached viewport and scissor forgotten, so the next draw sets them. */
 static void stereo_done(void)
 {
-    float zero = 0.0f;
+    float zero[2] = { 0.0f, 0.0f };
 
-    vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 4, &zero);
+    vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 8, zero);
     s_dyn.vw = 0;
     s_dyn.vh = 0;
     memset(&s_dyn.sr, 0xFF, sizeof s_dyn.sr);
@@ -7968,7 +7978,7 @@ static int init(void)
     pl.pSetLayouts = s_dsl;
     {
         /* Stereo: the eye's clip x shift (d3d8_glsl.h's D3D8_GLSL_EYE_PC). */
-        static VkPushConstantRange eye_pcr = { VK_SHADER_STAGE_VERTEX_BIT, 0, 4 };
+        static VkPushConstantRange eye_pcr = { VK_SHADER_STAGE_VERTEX_BIT, 0, 8 };
 
         pl.pushConstantRangeCount = 1;
         pl.pPushConstantRanges = &eye_pcr;
