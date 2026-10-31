@@ -47,10 +47,12 @@ typedef struct xbox_wheel_bind {
 
 /* The wheel's buttons, each the Xbox button the title acts on: ACCEPT is A
  * (confirms in menus; boost, and impact time in a crash), BACK is B (back;
- * the crashbreaker), PAUSE is Start, LOOKBACK is X, VIEW is Y. For these the
+ * the crashbreaker), PAUSE is Start, LOOKBACK is X, VIEW is Y, RECENTRE is the
+ * right stick pressed in (a host's VR mode recentres the headset's view with it). For these the
  * bind's axis field is the joystick's button index. */
 enum { XBOX_WHEEL_BTN_ACCEPT, XBOX_WHEEL_BTN_BACK, XBOX_WHEEL_BTN_PAUSE,
-       XBOX_WHEEL_BTN_LOOKBACK, XBOX_WHEEL_BTN_VIEW, XBOX_WHEEL_NBTN };
+       XBOX_WHEEL_BTN_LOOKBACK, XBOX_WHEEL_BTN_VIEW, XBOX_WHEEL_BTN_RECENTRE,
+       XBOX_WHEEL_NBTN };
 
 /* A hat's directions as SDL reports them (SDL_HAT_*), a bitmask. */
 #define XBOX_WHEEL_HAT_UP    1
@@ -235,6 +237,7 @@ static inline void xbox_wheel_apply_buttons(const uint8_t held[XBOX_WHEEL_NBTN],
     if (held[XBOX_WHEEL_BTN_LOOKBACK]) out->bAnalogButtons[XBOX_BUTTON_X] = 255;
     if (held[XBOX_WHEEL_BTN_VIEW])     out->bAnalogButtons[XBOX_BUTTON_Y] = 255;
     if (held[XBOX_WHEEL_BTN_PAUSE])    out->wButtons |= XBOX_GAMEPAD_START;
+    if (held[XBOX_WHEEL_BTN_RECENTRE]) out->wButtons |= XBOX_GAMEPAD_RIGHT_THUMB;
     if (hat & XBOX_WHEEL_HAT_UP) {
         out->wButtons |= XBOX_GAMEPAD_DPAD_UP;
         out->sThumbLY = 32767;
