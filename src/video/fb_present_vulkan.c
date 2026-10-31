@@ -2942,6 +2942,10 @@ static void post_gpu_read(void)
 /* The passes asked for (RECOMP_GFX_AA, RECOMP_GFX_SHARPEN), recorded into cb
  * over slot k. Returns the image and layout the scale to the window reads:
  * the last target, or the slot itself when no pass ran. */
+/* The frame the headset (oxr.c) is given: the slot, or the last post pass's target, and its layout. */
+static VkImage s_vr_src;
+static VkImageLayout s_vr_layout = VK_IMAGE_LAYOUT_GENERAL;
+
 static void post_run(VkCommandBuffer cb, int k, VkImage *src, VkImageLayout *layout)
 {
     int aa = nv2a_host_post_aa(), cas = nv2a_host_sharpen() > 0.001f;
@@ -3301,6 +3305,8 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
             }
         }
     }
+    s_vr_src = s_slot[k].img;
+    s_vr_layout = VK_IMAGE_LAYOUT_GENERAL;
     shot = shot_path && s_sc_shots;
     if (shot && s_shot_buf.size < (VkDeviceSize)s_sc_ext.width * s_sc_ext.height * 4u) {
         nvk_buffer_free(&s_shot_buf);
@@ -3391,6 +3397,8 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
              * target; else after the backend's copy into the slot (earlier on
              * the queue), and the clear above. */
             post_run(cb, k, &bsrc, &bsrc_layout);
+            s_vr_src = bsrc;
+            s_vr_layout = bsrc_layout;
             if (bsrc == s_slot[k].img)
                 nvk_image_barrier(cb, s_slot[k].img, VK_IMAGE_ASPECT_COLOR_BIT,
                                   VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL);
@@ -3590,19 +3598,6 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
             }
         }
     }
-    /* A side-by-side stereo pair (--vr, oxr.c): the slot into the headset's swapchain, before the window's own submit.
-     * The slot is read only here and by the window's blit; it is in the SDR format the headset path copies raw. */
-    if (xbox_VrActive() && s_slot[k].img && s_slot[k].layout == VK_IMAGE_LAYOUT_GENERAL
-            && s_slot[k].format == VK_FORMAT_B8G8R8A8_UNORM)
-        xbox_VrPresent(C, s_slot[k].img, s_slot[k].w, s_slot[k].h, s_slot[k].format, stereo, flip);
-    else if (stereo && xbox_VrActive()) {
-        static int said;
-
-        if (said++ < 3)
-            fprintf(stderr, LOGP "VR: a stereo frame cannot go to the headset: the slot is %s (the headset path copies the"
-                    " 8-bit SDR frame; turn HDR off: RECOMP_GFX_HDR=0)%s" "\n", s_slot[k].format == HDR_SLOT_FMT ? "HDR10" : "not GENERAL or not 8-bit",
-                    "");
-    }
     nvk_queue_lock();
     r = vkQueueSubmit(C->queue, 1, &si, s_fence[s_fi]);
     if (r == VK_SUCCESS) {
@@ -3613,6 +3608,20 @@ int fbv_present(SDL_Window *win, int k, uint32_t fw, uint32_t fh, int filter,
     }
     pr = r == VK_SUCCESS ? vkQueuePresentKHR(C->queue, &pi) : r;
     nvk_queue_unlock();
+    /* A side-by-side stereo pair (--vr, oxr.c): the frame (the anti-aliased one when RECOMP_GFX_AA
+     * is on) into the headset's swapchain, after the window's own submit on the same queue, so that the post passes have run.
+     * It is in the SDR format the headset path copies raw. */
+    if (xbox_VrActive() && s_slot[k].img && s_slot[k].layout == VK_IMAGE_LAYOUT_GENERAL
+            && s_slot[k].format == VK_FORMAT_B8G8R8A8_UNORM)
+        xbox_VrPresent(C, s_vr_src, s_vr_layout, s_slot[k].w, s_slot[k].h, s_slot[k].format, stereo, flip);
+    else if (stereo && xbox_VrActive()) {
+        static int said;
+
+        if (said++ < 3)
+            fprintf(stderr, LOGP "VR: a stereo frame cannot go to the headset: the slot is %s (the headset path copies the"
+                    " 8-bit SDR frame; turn HDR off: RECOMP_GFX_HDR=0)%s" "\n", s_slot[k].format == HDR_SLOT_FMT ? "HDR10" : "not GENERAL or not 8-bit",
+                    "");
+    }
     if (r == VK_SUCCESS) {
         uint64_t t = mono_ns();
         pthread_mutex_lock(&s_tm_mu);

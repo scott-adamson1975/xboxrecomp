@@ -31,8 +31,8 @@ int  xbox_VrActive(void);
  * image (GENERAL layout, B8G8R8A8_UNORM, w x h, the left eye in the left half), `stereo` the frame's stereo value
  * (nv2a_pb_state.h: the eye shift and the view window the layer's field of view comes from), `flip` for the log.
  * Does the OpenXR frame loop (events, wait, begin, copy, end) once; returns at once when the session is not running. */
-void xbox_VrPresent(const struct nvk_core *C, VkImage slot, uint32_t w, uint32_t h, VkFormat fmt, uint32_t stereo,
-                    uint32_t flip);
+void xbox_VrPresent(const struct nvk_core *C, VkImage slot, VkImageLayout slot_layout, uint32_t w, uint32_t h, VkFormat fmt,
+                    uint32_t stereo, uint32_t flip);
 
 /* The head, for the game's camera (any thread). The latest pose the headset gave, in the runtime's LOCAL space (right-handed:
  * +x right, +y up, -z forward). `id` (1..255, cycling) names it: the game puts it in the stereo value of the picture it draws
