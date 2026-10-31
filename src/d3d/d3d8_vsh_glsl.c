@@ -365,7 +365,7 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
         sb_append(&sb, "    gl_Position.x += eyepc.k;\n"
                        /* the HUD (ui > 0): pulled in toward the middle, the more the farther out, so that its corners sit
                         * on a rounder outline */
-                       "    if (eyepc.ui > 0.0 && gl_Position.w > 0.0) {\n"
+                       "    if (eyepc.ui != 0.0 && gl_Position.w > 0.0) {\n"
                        "        vec2 hn = gl_Position.xy / gl_Position.w;\n"
                        "        gl_Position.xy *= 1.0 - eyepc.ui * 0.5 * dot(hn, hn);\n"
                        "    }\n");

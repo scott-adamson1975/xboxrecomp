@@ -5176,7 +5176,7 @@ static int ubo_place(int which, const void *p, uint32_t n, VkDeviceSize *off)
 /* The HUD (a stereo value with no eye shift) is drawn smaller in each eye's half, about its middle, so that it sits in front of
  * the player and not at the very edge of the headset's view: RECOMP_STEREO_HUD_SCALE (default 0.5; 1 leaves it), its bottom edge at RECOMP_STEREO_HUD_BOTTOM (default 0.3 of the height below the middle). */
 static float s_ui_s = 1.0f;
-static float s_ui_round = 0.3f;    /* RECOMP_STEREO_HUD_ROUND: how far the HUD's corners are pulled in (the shader's eyepc.ui) */
+static float s_ui_round = -0.3f;    /* RECOMP_STEREO_HUD_ROUND: how far the HUD's corners are pulled in (the shader's eyepc.ui) */
 static float s_ui_b = 0.3f;        /* where the HUD's bottom edge sits, as a fraction of the height below the middle */
 
 static int stereo_for(const RenderTarget *rt, float *k)
@@ -5196,7 +5196,7 @@ static int stereo_for(const RenderTarget *rt, float *k)
             if (!(cfg >= 0.2f && cfg <= 1.0f))
                 cfg = 0.5f;
             e = getenv("RECOMP_STEREO_HUD_ROUND");
-            if (e && atof(e) >= 0.0 && atof(e) < 0.8)
+            if (e && *e && atof(e) > -0.8 && atof(e) < 0.8)
                 s_ui_round = (float)atof(e);
             e = getenv("RECOMP_STEREO_HUD_BOTTOM");
             if (e && atof(e) > 0.0 && atof(e) < 0.5)
@@ -6115,6 +6115,9 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         n.cull = zb_split ? VK_CULL_MODE_BACK_BIT
                : cull == 1 ? VK_CULL_MODE_BACK_BIT
                : cull == 2 ? VK_CULL_MODE_FRONT_BIT : VK_CULL_MODE_NONE;
+        /* The host's car-body mark (NV2A_STEREO_NOCULL): the body drawn with both faces, so that its inside is there. */
+        if (!zb_split && (nv2a_pb_stream_stereo() & (NV2A_STEREO_ON | NV2A_STEREO_NOCULL)) == (NV2A_STEREO_ON | NV2A_STEREO_NOCULL))
+            n.cull = VK_CULL_MODE_NONE;
         (void)nv2a_blend_constant(g->blend_enable, g->blend_sfactor,
                                   g->blend_dfactor, g->blend_color, n.bf, &(int){0});
         if (s_enc_dt && use_z)
