@@ -5838,6 +5838,27 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
         s_draws_skipped++;
         return;
     }
+    if ((nv2a_pb_stream_stereo() & (NV2A_STEREO_ON | NV2A_STEREO_NOCULL)) == (NV2A_STEREO_ON | NV2A_STEREO_NOCULL)) {
+        /* The host's car-body window (the player's car seen from its seat): its glass is not drawn (the blended draws; the
+         * RECOMP_STEREO_CAR_GLASS=1 setting keeps it). RECOMP_STEREO_DEBUG logs these draws. */
+        static int dbg = -1, glass = -1, nd;
+
+        if (dbg < 0) {
+            dbg = getenv("RECOMP_STEREO_DEBUG") != NULL;
+            glass = getenv("RECOMP_STEREO_CAR_GLASS") != NULL;
+        }
+        if (dbg && nd < 200) {
+            nd++;
+            fprintf(stderr, LOGP "car draw %d: %u indices, blend %d, depth %d/%d, tex0 %s 0x%08X %ux%u fmt 0x%02X, cull %d\n", nd,
+                    (unsigned)d->idx_count, (int)g->blend_enable, (int)v->depth_enable, (int)v->depth_mask,
+                    s_stage[0].mode ? "on" : "off", (unsigned)s_stage[0].offset, (unsigned)s_stage[0].width,
+                    (unsigned)s_stage[0].height, (unsigned)s_stage[0].color, 0);
+        }
+        if (g->blend_enable && !glass) {
+            s_draws_skipped++;
+            return;
+        }
+    }
     if (d->program) {
         VsEntry *e = vs_cache();
         s_draws_prog++;
