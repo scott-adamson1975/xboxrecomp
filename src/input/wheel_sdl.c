@@ -88,6 +88,7 @@ int xbox_InputWheelClaims(unsigned vid, unsigned pid)
  * there is no fade, and the fade is the safety. */
 static SDL_Haptic *g_hap;
 static int g_spring_id = -1;
+static int g_rum_ok, g_kick_ok;      /* the base can play them, and they are asked for */
 static int g_rum_id = -1;           /* the rumble: a sine effect whose strength follows the title's motors */
 static double g_rum_pct;            /* RECOMP_WHEEL_RUMBLE: the strength at the title's full rumble, percent; 0 = off */
 static int g_rum_level = -1;        /* the magnitude the base has */
@@ -193,49 +194,19 @@ static void ffb_open(SDL_Joystick *j)
         ffb_unlock();
         return;
     }
-    if ((g_rum_pct > 0 || g_eng_pct > 0) && (feat & SDL_HAPTIC_SINE)) {
-        /* The rumble: a 25 Hz sine along the steering axis, its strength set by wheel_rumble from the title's motors. */
-        SDL_HapticEffect r;
-
-        memset(&r, 0, sizeof r);
-        r.type = SDL_HAPTIC_SINE;
-        r.periodic.direction.type = SDL_HAPTIC_CARTESIAN;
-        r.periodic.direction.dir[0] = 1;
-        r.periodic.length = SDL_HAPTIC_INFINITY;
-        r.periodic.period = 40;
-        r.periodic.magnitude = 0;
-        g_rum_id = SDL_HapticNewEffect(g_hap, &r);
-        if (g_rum_id < 0 || SDL_HapticRunEffect(g_hap, g_rum_id, 1) != 0) {
-            XR_NOTICE("[WHEEL] rumble: the base refused the effect (%s): rumble off\n", SDL_GetError());
-            if (g_rum_id >= 0)
-                SDL_HapticDestroyEffect(g_hap, g_rum_id);
-            g_rum_id = -1;
-        } else {
-            g_rum_level = 0;
-            XR_NOTICE("[WHEEL] rumble: the title's rumble on the wheel, up to %.0f%%, the engine up to %.0f%%\n", g_rum_pct, g_eng_pct);
-        }
-    } else if (g_rum_pct > 0 || g_eng_pct > 0) {
+    /* The rumble (a sine) and the hits' weight (a constant force) are made when they are needed, with their final numbers, and
+     * let go after: updating a running one did not make the base play it (a test of each kind, played fresh, did). */
+    g_rum_ok = (g_rum_pct > 0 || g_eng_pct > 0) && (feat & SDL_HAPTIC_SINE);
+    g_kick_ok = g_kick_pct > 0 && (feat & SDL_HAPTIC_CONSTANT);
+    if (g_rum_ok)
+        XR_NOTICE("[WHEEL] rumble: the title's rumble on the wheel, up to %.0f%%, the engine up to %.0f%%\n", g_rum_pct, g_eng_pct);
+    else if (g_rum_pct > 0 || g_eng_pct > 0)
         XR_NOTICE("[WHEEL] rumble: the base has no sine effect (0x%X): rumble off\n", feat);
-    }
-    if (g_kick_pct > 0 && (feat & SDL_HAPTIC_CONSTANT)) {
-        SDL_HapticEffect k;
-
-        memset(&k, 0, sizeof k);
-        k.type = SDL_HAPTIC_CONSTANT;
-        k.constant.direction.type = SDL_HAPTIC_CARTESIAN;
-        k.constant.direction.dir[0] = 1;
-        k.constant.length = 600;
-        k.constant.attack_length = 30;
-        k.constant.fade_length = 420;
-        g_kick_id = SDL_HapticNewEffect(g_hap, &k);
-        if (g_kick_id >= 0)
-            XR_NOTICE("[WHEEL] hits: a weight on the wheel toward the side the car is hit from, up to %.0f%%%s\n", g_kick_pct,
-                      g_kick_flip ? " (flipped)" : "");
-        else
-            XR_NOTICE("[WHEEL] hits: the base refused the constant force (%s): off\n", SDL_GetError());
-    } else if (g_kick_pct > 0) {
+    if (g_kick_ok)
+        XR_NOTICE("[WHEEL] hits: a weight on the wheel toward the side the car is hit from, up to %.0f%%%s\n", g_kick_pct,
+                  g_kick_flip ? " (flipped)" : "");
+    else if (g_kick_pct > 0)
         XR_NOTICE("[WHEEL] hits: the base has no constant force (0x%X): off\n", feat);
-    }
     g_ffb_t = SDL_GetTicks();
     XR_NOTICE("[WHEEL] force feedback: centring spring %.0f%% at the lock's edge "
               "(coefficient %d, saturation %u of 65535), faded in over %.1f s\n",
@@ -243,14 +214,15 @@ static void ffb_open(SDL_Joystick *j)
     ffb_unlock();
 }
 
-/* The rumble's sine from the title's rumble and the engine's: the stronger of the two, the period shorter with the engine's speed.
- * The lock is held. */
+/* The rumble's sine from the title's rumble, the engine's and a jolt's: the strongest, the period shorter with the engine's speed.
+ * A new effect with the final numbers each time they change enough (updating the running one was not played by the base), the old
+ * one stopped and let go. The lock is held. */
 static void rumble_apply_locked(void)
 {
     double lv = g_title_lv * g_rum_pct / 100.0, e = g_eng_lv * g_eng_pct / 100.0, j = g_jolt_lv * g_rum_pct / 100.0;
     int mag, period;
 
-    if (!g_hap || g_rum_id < 0)
+    if (!g_hap || !g_rum_ok)
         return;
     lv = lv > e ? lv : e;
     lv = lv > j ? lv : j;
@@ -258,9 +230,19 @@ static void rumble_apply_locked(void)
     if (mag > 32767)
         mag = 32767;
     period = g_eng_lv > 0 ? (int)(50.0 - 25.0 * g_eng_lv + 0.5) : 40;
-    if (mag == 0 ? g_rum_level != 0 : (mag - g_rum_level > 800 || g_rum_level - mag > 800 || g_rum_level == 0
-                                       || period - g_rum_period > 4 || g_rum_period - period > 4)) {
+    if (mag < 400) {                                        /* nothing to feel */
+        if (g_rum_id >= 0) {
+            SDL_HapticStopEffect(g_hap, g_rum_id);
+            SDL_HapticDestroyEffect(g_hap, g_rum_id);
+            g_rum_id = -1;
+        }
+        g_rum_level = 0;
+        return;
+    }
+    if (g_rum_id < 0 || mag - g_rum_level > 1500 || g_rum_level - mag > 1500 || period - g_rum_period > 6
+            || g_rum_period - period > 6) {
         SDL_HapticEffect r;
+        int id;
 
         memset(&r, 0, sizeof r);
         r.type = SDL_HAPTIC_SINE;
@@ -269,11 +251,17 @@ static void rumble_apply_locked(void)
         r.periodic.length = SDL_HAPTIC_INFINITY;
         r.periodic.period = (Uint16)period;
         r.periodic.magnitude = (Sint16)mag;
-        if (SDL_HapticUpdateEffect(g_hap, g_rum_id, &r) == 0) {
-            if (g_rum_level == 0 && mag > 0)
-                SDL_HapticRunEffect(g_hap, g_rum_id, 1);
+        id = SDL_HapticNewEffect(g_hap, &r);
+        if (id >= 0 && SDL_HapticRunEffect(g_hap, id, 1) == 0) {
+            if (g_rum_id >= 0) {
+                SDL_HapticStopEffect(g_hap, g_rum_id);
+                SDL_HapticDestroyEffect(g_hap, g_rum_id);
+            }
+            g_rum_id = id;
             g_rum_level = mag;
             g_rum_period = period;
+        } else if (id >= 0) {
+            SDL_HapticDestroyEffect(g_hap, id);
         }
     }
 }
@@ -283,7 +271,7 @@ static void wheel_rumble(unsigned short left, unsigned short right)
 {
     unsigned lv = left > right ? left : right;
 
-    if (g_rum_id < 0 || !g_hap)
+    if (!g_rum_ok || !g_hap)
         return;
     ffb_lock();
     g_title_lv = (double)lv / 65535.0;
@@ -291,33 +279,50 @@ static void wheel_rumble(unsigned short left, unsigned short right)
     ffb_unlock();
 }
 
-/* A hit: a constant force along the steering axis, to `side` (-1 left, 1 right), `kick` (0..1) of the strength. The lock is held. */
+/* A hit: a constant force along the steering axis, to `side` (-1 left, 1 right), `kick` (0..1) of the strength, 450 ms, a new effect
+ * each time (the one before is let go when it has ended). In the base's own sense a positive level pushes to the LEFT (a test of
+ * the base: +12000 pushed left, -12000 right). The lock is held. */
+static void kick_reap(Uint32 now)
+{
+    if (g_kick_id >= 0 && now - g_kick_t > 600) {
+        SDL_HapticStopEffect(g_hap, g_kick_id);
+        SDL_HapticDestroyEffect(g_hap, g_kick_id);
+        g_kick_id = -1;
+    }
+}
+
 static void kick_fire(double side, double kick)
 {
     SDL_HapticEffect k;
     Uint32 now = SDL_GetTicks();
-    int level;
+    int level, id;
 
-    if (g_kick_id < 0 || !g_hap || kick <= 0.0)
+    if (!g_kick_ok || !g_hap || kick <= 0.0)
         return;
     if (now - g_kick_t < 120 && kick <= g_kick_last)       /* a run of records of one hit: the first sets it */
         return;
-    level = (int)(kick * g_kick_pct / 100.0 * 32767.0 + 0.5) * (side < 0.0 ? -1 : 1) * (g_kick_flip ? -1 : 1);
+    level = (int)(kick * g_kick_pct / 100.0 * 32767.0 + 0.5) * (side < 0.0 ? 1 : -1) * (g_kick_flip ? -1 : 1);
     if (level > 32767) level = 32767;
     if (level < -32767) level = -32767;
     memset(&k, 0, sizeof k);
     k.type = SDL_HAPTIC_CONSTANT;
     k.constant.direction.type = SDL_HAPTIC_CARTESIAN;
     k.constant.direction.dir[0] = 1;
-    k.constant.length = 600;
-    k.constant.attack_length = 30;
-    k.constant.fade_length = 420;
+    k.constant.length = 450;
     k.constant.level = (Sint16)level;
-    if (SDL_HapticUpdateEffect(g_hap, g_kick_id, &k) == 0 && SDL_HapticRunEffect(g_hap, g_kick_id, 1) == 0) {
+    id = SDL_HapticNewEffect(g_hap, &k);
+    if (id >= 0 && SDL_HapticRunEffect(g_hap, id, 1) == 0) {
+        if (g_kick_id >= 0) {
+            SDL_HapticStopEffect(g_hap, g_kick_id);
+            SDL_HapticDestroyEffect(g_hap, g_kick_id);
+        }
+        g_kick_id = id;
         g_kick_t = now;
         g_kick_last = kick;
         if (g_log)
-            XR_NOTICE("[WHEEL] hit: weight %d toward the %s\n", level, level < 0 ? "left" : "right");
+            XR_NOTICE("[WHEEL] hit: weight %d toward the %s\n", level, level > 0 ? "left" : "right");
+    } else if (id >= 0) {
+        SDL_HapticDestroyEffect(g_hap, id);
     }
 }
 
@@ -383,7 +388,8 @@ static void ffb_tick(Uint32 now, int64_t steer)
                     XR_NOTICE("[WHEEL] force feedback: updating the spring failed (%s)\n", SDL_GetError());
             }
         }
-        if (g_rum_id >= 0) {
+        kick_reap(now);
+        if (g_rum_ok) {
             /* The engine: light, a little at a standstill and more with speed, only in a race. */
             double sp = speed / 40.0;
 
