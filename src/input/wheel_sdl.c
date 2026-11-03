@@ -88,6 +88,13 @@ int xbox_InputWheelClaims(unsigned vid, unsigned pid)
  * there is no fade, and the fade is the safety. */
 static SDL_Haptic *g_hap;
 static int g_spring_id = -1;
+static int g_rum_id = -1;           /* the rumble: a sine effect whose strength follows the title's motors */
+static double g_rum_pct;            /* RECOMP_WHEEL_RUMBLE: the strength at the title's full rumble, percent; 0 = off */
+static int g_rum_level = -1;        /* the magnitude the base has */
+static int g_rum_period = 40;       /* and its period, ms */
+static double g_eng_pct;            /* RECOMP_WHEEL_ENGINE: a light engine vibration while racing, percent of the base's force; 0 = off */
+static double g_title_lv;           /* the title's rumble, 0..1 */
+static double g_eng_lv;             /* the engine's, 0..1 */
 static double g_spring_pct;         /* RECOMP_WHEEL_FFB_SPRING, 0 = off */
 static double g_ffb_gain;           /* 0..1, what the base is given */
 static int g_ffb_gain_set = -1;     /* the percent last given to the base */
@@ -115,6 +122,9 @@ static void ffb_close_locked(void)
     SDL_HapticStopAll(g_hap);
     if (g_spring_id >= 0)
         SDL_HapticDestroyEffect(g_hap, g_spring_id);
+    if (g_rum_id >= 0)
+        SDL_HapticDestroyEffect(g_hap, g_rum_id);
+    g_rum_id = -1;
     SDL_HapticClose(g_hap);
     g_hap = NULL;
     g_spring_id = -1;
@@ -174,10 +184,79 @@ static void ffb_open(SDL_Joystick *j)
         ffb_unlock();
         return;
     }
+    if ((g_rum_pct > 0 || g_eng_pct > 0) && (feat & SDL_HAPTIC_SINE)) {
+        /* The rumble: a 25 Hz sine along the steering axis, its strength set by wheel_rumble from the title's motors. */
+        SDL_HapticEffect r;
+
+        memset(&r, 0, sizeof r);
+        r.type = SDL_HAPTIC_SINE;
+        r.periodic.direction.type = SDL_HAPTIC_CARTESIAN;
+        r.periodic.direction.dir[0] = 1;
+        r.periodic.length = SDL_HAPTIC_INFINITY;
+        r.periodic.period = 40;
+        r.periodic.magnitude = 0;
+        g_rum_id = SDL_HapticNewEffect(g_hap, &r);
+        if (g_rum_id < 0 || SDL_HapticRunEffect(g_hap, g_rum_id, 1) != 0) {
+            XR_NOTICE("[WHEEL] rumble: the base refused the effect (%s): rumble off\n", SDL_GetError());
+            if (g_rum_id >= 0)
+                SDL_HapticDestroyEffect(g_hap, g_rum_id);
+            g_rum_id = -1;
+        } else {
+            g_rum_level = 0;
+            XR_NOTICE("[WHEEL] rumble: the title's rumble on the wheel, up to %.0f%%, the engine up to %.0f%%\n", g_rum_pct, g_eng_pct);
+        }
+    } else if (g_rum_pct > 0 || g_eng_pct > 0) {
+        XR_NOTICE("[WHEEL] rumble: the base has no sine effect (0x%X): rumble off\n", feat);
+    }
     g_ffb_t = SDL_GetTicks();
     XR_NOTICE("[WHEEL] force feedback: centring spring %.0f%% at the lock's edge "
               "(coefficient %d, saturation %u of 65535), faded in over %.1f s\n",
               g_spring_pct, sp.coeff, sp.sat, XBOX_WHEEL_RAMP_UP_MS / 1000.0);
+    ffb_unlock();
+}
+
+/* The rumble's sine from the title's rumble and the engine's: the stronger of the two, the period shorter with the engine's speed.
+ * The lock is held. */
+static void rumble_apply_locked(void)
+{
+    double lv = g_title_lv * g_rum_pct / 100.0, e = g_eng_lv * g_eng_pct / 100.0;
+    int mag, period;
+
+    if (!g_hap || g_rum_id < 0)
+        return;
+    lv = lv > e ? lv : e;
+    mag = (int)(lv * 32767.0 + 0.5);
+    if (mag > 32767)
+        mag = 32767;
+    period = g_eng_lv > 0 ? (int)(50.0 - 25.0 * g_eng_lv + 0.5) : 40;
+    if (mag == 0 ? g_rum_level != 0 : (mag - g_rum_level > 800 || g_rum_level - mag > 800 || g_rum_level == 0
+                                       || period - g_rum_period > 4 || g_rum_period - period > 4)) {
+        SDL_HapticEffect r;
+
+        memset(&r, 0, sizeof r);
+        r.type = SDL_HAPTIC_SINE;
+        r.periodic.direction.type = SDL_HAPTIC_CARTESIAN;
+        r.periodic.direction.dir[0] = 1;
+        r.periodic.length = SDL_HAPTIC_INFINITY;
+        r.periodic.period = (Uint16)period;
+        r.periodic.magnitude = (Sint16)mag;
+        if (SDL_HapticUpdateEffect(g_hap, g_rum_id, &r) == 0) {
+            g_rum_level = mag;
+            g_rum_period = period;
+        }
+    }
+}
+
+/* The title's rumble (input_core.c hands the motors' speeds of port 0): the strongest of the two. */
+static void wheel_rumble(unsigned short left, unsigned short right)
+{
+    unsigned lv = left > right ? left : right;
+
+    if (g_rum_id < 0 || !g_hap)
+        return;
+    ffb_lock();
+    g_title_lv = (double)lv / 65535.0;
+    rumble_apply_locked();
     ffb_unlock();
 }
 
@@ -216,6 +295,11 @@ static void ffb_tick(Uint32 now, int64_t steer)
         if (car)
             racing = car(&speed) != 0;
         target = xbox_wheel_level_target(&g_level_cfg, car != NULL, racing, speed);
+        if (racing && xbox_InputWheelGripSource()) {
+            double gr = xbox_InputWheelGripSource()();
+
+            target *= gr < 0.0 ? 0.0 : gr > 1.0 ? 1.0 : gr;
+        }
         g_level = g_level < 0 ? target : xbox_wheel_level_step(g_level, target, dt);
         if (g_spring_id >= 0) {
             xbox_wheel_spring sp = xbox_wheel_spring_params(&g_cfg, g_spring_pct * g_level);
@@ -230,6 +314,13 @@ static void ffb_tick(Uint32 now, int64_t steer)
                 else if (g_log)
                     XR_NOTICE("[WHEEL] force feedback: updating the spring failed (%s)\n", SDL_GetError());
             }
+        }
+        if (g_rum_id >= 0) {
+            /* The engine: light, a little at a standstill and more with speed, only in a race. */
+            double sp = speed / 40.0;
+
+            g_eng_lv = (g_eng_pct > 0 && racing) ? 0.25 + 0.75 * (sp > 1.0 ? 1.0 : sp < 0.0 ? 0.0 : sp) : 0.0;
+            rumble_apply_locked();
         }
         if (g_log && car && now - g_level_log_t >= 1000) {      /* once a second: what the spring is doing */
             g_level_log_t = now;
@@ -472,6 +563,14 @@ void xbox_InputWheelInit(void)
     if (g_spring_pct > 0 && (g_level_cfg.speed_ref > 0 || g_level_cfg.race_only))
         XR_NOTICE("[WHEEL] force feedback: spring level%s%s (needs the game to feed the car)\n",
                   g_level_cfg.speed_ref > 0 ? " follows the speed" : "", g_level_cfg.race_only ? ", off outside a race" : "");
+    g_rum_pct = recomp_env_double(RENV_INPUT_WHEEL_RUMBLE, 0.0);
+    if (g_rum_pct > 100.0)
+        g_rum_pct = 100.0;
+    g_eng_pct = recomp_env_double(RENV_INPUT_WHEEL_ENGINE, 0.0);
+    if (g_eng_pct > 100.0)
+        g_eng_pct = 100.0;
+    if ((g_rum_pct > 0 || g_eng_pct > 0) && g_spring_pct <= 0)
+        XR_NOTICE("[WHEEL] RECOMP_WHEEL_RUMBLE needs RECOMP_WHEEL_FFB_SPRING (the force feedback with its fade and guard): rumble off\n");
     if (g_spring_pct > 0 && !g_ffb_lock)
         g_ffb_lock = SDL_CreateMutex();
     dev_want(&g_cfg.steer);
@@ -485,6 +584,8 @@ void xbox_InputWheelInit(void)
     g_on = 1;
     dev_scan();
     xbox_InputWheelSetReader(wheel_read);
+    if (g_rum_pct > 0 && g_spring_pct > 0)
+        xbox_InputWheelSetRumble(wheel_rumble);
     XR_NOTICE("[WHEEL] on: wheel turns %.0f degrees, game lock %.0f, pedal deadzone %.0f%%, "
               "steering deadzone %.1f%%, skip %.1f%%\n",
               g_cfg.range_deg, g_cfg.lock_deg, g_cfg.pedal_dead, g_cfg.steer_dead, g_cfg.steer_skip);

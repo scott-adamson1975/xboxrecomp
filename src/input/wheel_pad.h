@@ -304,7 +304,7 @@ static inline void xbox_wheel_merge(XBOX_GAMEPAD *pad, const XBOX_GAMEPAD *w)
  * fraction of the base's whole range), up to the saturation. So reaching the
  * strength at the lock's edge (lock/2 from the centre, against range/2 for the
  * whole travel) takes a coefficient range/lock times the strength. */
-#define XBOX_WHEEL_SPRING_MAX     50.0     /* the strength is never above this, percent */
+#define XBOX_WHEEL_SPRING_MAX    100.0     /* the strength is never above this, percent */
 #define XBOX_WHEEL_RAMP_UP_MS   1500.0     /* from no force to the full strength */
 #define XBOX_WHEEL_RAMP_DOWN_MS  150.0     /* and back */
 #define XBOX_WHEEL_RAMP_STEP_MS   50.0     /* one step of a fade-in is never longer: a stall must not skip it */
@@ -463,9 +463,14 @@ void xbox_InputWheelShutdown(void);     /* the end of the run: the force off, th
 int  xbox_InputWheelClaims(unsigned vid, unsigned pid);
 int  xbox_InputMainPumpActive(void);
 void xbox_InputWheelSetReader(xbox_wheel_read_fn fn);
+/* The sink for the title's rumble on port 0 (the two motors' speeds, 0..65535), called as they change; input_core.c. */
+void xbox_InputWheelSetRumble(void (*fn)(unsigned short left, unsigned short right));
 /* The host's car feed for the spring's level (any backend; the SDL glue reads it). NULL: none. */
 void xbox_InputWheelSetCarSource(xbox_wheel_car_fn fn);
 xbox_wheel_car_fn xbox_InputWheelCarSource(void);
+/* How much of the spring the front wheels have, 0..1 (the host's: 0 in the air, less in a drift): a multiplier on the level, while racing. */
+void xbox_InputWheelSetGripSource(double (*fn)(void));
+double (*xbox_InputWheelGripSource(void))(void);
 
 #ifdef __cplusplus
 }
