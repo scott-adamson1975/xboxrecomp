@@ -470,8 +470,9 @@ void xbox_InputWheelSetCarSource(xbox_wheel_car_fn fn);
 xbox_wheel_car_fn xbox_InputWheelCarSource(void);
 /* How much of the spring the front wheels have, 0..1 (the host's: 0 in the air, less in a drift): a multiplier on the level, while
  * racing. It also reports a hit: *kick (0..1, 0 for none) is a new impact's strength and *kick_side (-1 left .. 1 right) the side the
- * car is pushed to, once per impact; the wheel is given a weight to that side for a moment. */
-typedef double (*xbox_wheel_grip_fn)(double *kick_side, double *kick);
+ * car is pushed to, once per impact; the wheel is given a weight to that side for a moment. *jolt (0..1) is a short shake of the wheel
+ * for the same event (a hit from any side, a landing). */
+typedef double (*xbox_wheel_grip_fn)(double *kick_side, double *kick, double *jolt);
 void xbox_InputWheelSetGripSource(xbox_wheel_grip_fn fn);
 xbox_wheel_grip_fn xbox_InputWheelGripSource(void);
 
