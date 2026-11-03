@@ -468,9 +468,12 @@ void xbox_InputWheelSetRumble(void (*fn)(unsigned short left, unsigned short rig
 /* The host's car feed for the spring's level (any backend; the SDL glue reads it). NULL: none. */
 void xbox_InputWheelSetCarSource(xbox_wheel_car_fn fn);
 xbox_wheel_car_fn xbox_InputWheelCarSource(void);
-/* How much of the spring the front wheels have, 0..1 (the host's: 0 in the air, less in a drift): a multiplier on the level, while racing. */
-void xbox_InputWheelSetGripSource(double (*fn)(void));
-double (*xbox_InputWheelGripSource(void))(void);
+/* How much of the spring the front wheels have, 0..1 (the host's: 0 in the air, less in a drift): a multiplier on the level, while
+ * racing. It also reports a hit: *kick (0..1, 0 for none) is a new impact's strength and *kick_side (-1 left .. 1 right) the side the
+ * car is pushed to, once per impact; the wheel is given a weight to that side for a moment. */
+typedef double (*xbox_wheel_grip_fn)(double *kick_side, double *kick);
+void xbox_InputWheelSetGripSource(xbox_wheel_grip_fn fn);
+xbox_wheel_grip_fn xbox_InputWheelGripSource(void);
 
 #ifdef __cplusplus
 }

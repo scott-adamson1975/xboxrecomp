@@ -578,9 +578,9 @@ static XBOX_GAMEPAD g_wheel_last;
 static xbox_wheel_car_fn g_wheel_car;
 void xbox_InputWheelSetCarSource(xbox_wheel_car_fn fn) { g_wheel_car = fn; }
 xbox_wheel_car_fn xbox_InputWheelCarSource(void) { return g_wheel_car; }
-static double (*g_wheel_grip)(void);
-void xbox_InputWheelSetGripSource(double (*fn)(void)) { g_wheel_grip = fn; }
-double (*xbox_InputWheelGripSource(void))(void) { return g_wheel_grip; }
+static xbox_wheel_grip_fn g_wheel_grip;
+void xbox_InputWheelSetGripSource(xbox_wheel_grip_fn fn) { g_wheel_grip = fn; }
+xbox_wheel_grip_fn xbox_InputWheelGripSource(void) { return g_wheel_grip; }
 
 void xbox_InputWheelSetReader(xbox_wheel_read_fn fn)
 {
