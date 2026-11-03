@@ -98,6 +98,7 @@ static double g_kick_pct;           /* RECOMP_WHEEL_KICK: percent of the base's 
 static int g_kick_flip;             /* RECOMP_WHEEL_KICK_FLIP=1: the other way, if the weight comes out on the wrong side */
 static Uint32 g_kick_t;
 static double g_kick_last;
+static double g_jolt_lv;            /* a hit's or a landing's shake, 0..1, dying away over 250 ms */
 static double g_title_lv;           /* the title's rumble, 0..1 */
 static double g_eng_lv;             /* the engine's, 0..1 */
 static double g_spring_pct;         /* RECOMP_WHEEL_FFB_SPRING, 0 = off */
@@ -246,12 +247,13 @@ static void ffb_open(SDL_Joystick *j)
  * The lock is held. */
 static void rumble_apply_locked(void)
 {
-    double lv = g_title_lv * g_rum_pct / 100.0, e = g_eng_lv * g_eng_pct / 100.0;
+    double lv = g_title_lv * g_rum_pct / 100.0, e = g_eng_lv * g_eng_pct / 100.0, j = g_jolt_lv * g_rum_pct / 100.0;
     int mag, period;
 
     if (!g_hap || g_rum_id < 0)
         return;
     lv = lv > e ? lv : e;
+    lv = lv > j ? lv : j;
     mag = (int)(lv * 32767.0 + 0.5);
     if (mag > 32767)
         mag = 32767;
@@ -355,11 +357,13 @@ static void ffb_tick(Uint32 now, int64_t steer)
             racing = car(&speed) != 0;
         target = xbox_wheel_level_target(&g_level_cfg, car != NULL, racing, speed);
         if (racing && xbox_InputWheelGripSource()) {
-            double side = 0.0, kick = 0.0, gr = xbox_InputWheelGripSource()(&side, &kick);
+            double side = 0.0, kick = 0.0, jolt = 0.0, gr = xbox_InputWheelGripSource()(&side, &kick, &jolt);
 
             target *= gr < 0.0 ? 0.0 : gr > 1.0 ? 1.0 : gr;
             if (kick > 0.0)
                 kick_fire(side, kick);
+            if (jolt > g_jolt_lv)
+                g_jolt_lv = jolt > 1.0 ? 1.0 : jolt;
         }
         g_level = g_level < 0 ? target : xbox_wheel_level_step(g_level, target, dt);
         if (g_spring_id >= 0) {
@@ -384,6 +388,9 @@ static void ffb_tick(Uint32 now, int64_t steer)
             double sp = speed / 40.0;
 
             g_eng_lv = (g_eng_pct > 0 && racing) ? 0.25 + 0.75 * (sp > 1.0 ? 1.0 : sp < 0.0 ? 0.0 : sp) : 0.0;
+            g_jolt_lv -= dt / 250.0;
+            if (g_jolt_lv < 0.0)
+                g_jolt_lv = 0.0;
             rumble_apply_locked();
         }
         if (g_log && car && now - g_level_log_t >= 1000) {      /* once a second: what the spring is doing */
