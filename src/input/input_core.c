@@ -277,6 +277,9 @@ static int rumble_muted(void) { return g_blocked || g_background || g_shutdown; 
  * overlay is open, the window is not in front, or the run is ending. */
 int xbox_InputOutputMuted(void) { return rumble_muted(); }
 
+static void (*g_wheel_rumble)(unsigned short left, unsigned short right);
+void xbox_InputWheelSetRumble(void (*fn)(unsigned short left, unsigned short right)) { g_wheel_rumble = fn; }
+
 static WORD rumble_word(double level)
 {
     level = level * 65535.0 + 0.5;
@@ -301,6 +304,8 @@ static DWORD rumble_step(DWORD port)
         o[i] = rumble_word(xbox_RumbleStep(&r->m[i], r->target[i], &g_rumble_params, dt));
     r->step_ms = now;
     r->live = 1;
+    if (port == 0 && g_wheel_rumble)
+        g_wheel_rumble(rumble_muted() ? 0 : o[0], rumble_muted() ? 0 : o[1]);
     if (rumble_muted())
         return ERROR_SUCCESS;
 
@@ -573,6 +578,9 @@ static XBOX_GAMEPAD g_wheel_last;
 static xbox_wheel_car_fn g_wheel_car;
 void xbox_InputWheelSetCarSource(xbox_wheel_car_fn fn) { g_wheel_car = fn; }
 xbox_wheel_car_fn xbox_InputWheelCarSource(void) { return g_wheel_car; }
+static double (*g_wheel_grip)(void);
+void xbox_InputWheelSetGripSource(double (*fn)(void)) { g_wheel_grip = fn; }
+double (*xbox_InputWheelGripSource(void))(void) { return g_wheel_grip; }
 
 void xbox_InputWheelSetReader(xbox_wheel_read_fn fn)
 {
