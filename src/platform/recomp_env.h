@@ -129,6 +129,14 @@ extern "C" {
     X(INPUT_WHEEL_ENGINE, CONFIG, "RECOMP_WHEEL_ENGINE", NULL, "racing wheel: a light engine vibration while racing, a little at a standstill and more with speed, this percent of the base's force at most (needs RECOMP_WHEEL_FFB_SPRING; default 0, off)") \
     X(INPUT_WHEEL_KICK, CONFIG, "RECOMP_WHEEL_KICK", NULL, "racing wheel: when the car is hit, a weight on the wheel toward the side it is hit from (a constant force for about half a second), this percent of the base's force at the hardest hit (needs RECOMP_WHEEL_FFB_SPRING and a host that reports hits; default 0, off)") \
     X(INPUT_WHEEL_KICK_FLIP, CONFIG, "RECOMP_WHEEL_KICK_FLIP", NULL, "1: the hit's weight the other way round, if it comes out on the wrong side") \
+    X(INPUT_WHEEL_STEER_SENS, CONFIG, "RECOMP_WHEEL_STEER_SENS", NULL, "racing wheel: steering sensitivity, percent (default 100): how much of the wheel's travel the stick gets, on top of the lock; 200 reaches full deflection at half the turn") \
+    X(INPUT_WHEEL_STEER_LIN, CONFIG, "RECOMP_WHEEL_STEER_LIN", NULL, "racing wheel: steering linearity, -100..100 (default 0, linear): above 0 the stick moves less around the centre and more near the ends, below 0 more around the centre") \
+    X(INPUT_WHEEL_THROTTLE_SENS, CONFIG, "RECOMP_WHEEL_THROTTLE_SENS", NULL, "racing wheel: throttle pedal sensitivity, percent (default 100): 200 reaches full throttle at half the travel") \
+    X(INPUT_WHEEL_THROTTLE_LIN, CONFIG, "RECOMP_WHEEL_THROTTLE_LIN", NULL, "racing wheel: throttle pedal linearity, -100..100 (default 0): above 0 gentler at first, below 0 sharper at first") \
+    X(INPUT_WHEEL_BRAKE_SENS, CONFIG, "RECOMP_WHEEL_BRAKE_SENS", NULL, "racing wheel: brake pedal sensitivity, percent (default 100)") \
+    X(INPUT_WHEEL_BRAKE_LIN, CONFIG, "RECOMP_WHEEL_BRAKE_LIN", NULL, "racing wheel: brake pedal linearity, -100..100 (default 0)") \
+    X(INPUT_WHEEL_FFB_AIR, CONFIG, "RECOMP_WHEEL_FFB_AIR", NULL, "racing wheel (the Burnout 3 host): the percent of the spring left while the car is in the air (default 0)") \
+    X(INPUT_WHEEL_FFB_DRIFT, CONFIG, "RECOMP_WHEEL_FFB_DRIFT", NULL, "racing wheel (the Burnout 3 host): the percent of the spring left in a full drift, so that the wheel goes light as the front slips (default 15; 100 leaves the spring alone)") \
     X(INPUT_WHEEL_BTN_ACCEPT, CONFIG, "RECOMP_WHEEL_BTN_ACCEPT", NULL, "racing wheel, accept button, VID:PID:N (N: the joystick's button index, from 0): the game's A (confirms in menus; boost in a race; impact time in a crash)") \
     X(INPUT_WHEEL_BTN_BACK, CONFIG, "RECOMP_WHEEL_BTN_BACK", NULL, "racing wheel, back button, VID:PID:N: the game's B (back in menus; the crashbreaker)") \
     X(INPUT_WHEEL_BTN_PAUSE, CONFIG, "RECOMP_WHEEL_BTN_PAUSE", NULL, "racing wheel, pause button, VID:PID:N: the game's Start") \

@@ -505,6 +505,57 @@ int main(void)
     g = read0(&rc, &src, NULL);
     CHECK(rc == ERROR_SUCCESS && src == XBOX_INPUT_SRC_PAD);
 
+    /* sensitivity and linearity (the Wheel page's) */
+    {
+        xbox_wheel_cfg w;
+        int16_t base, sens, soft, sharp;
+
+        xbox_wheel_cfg_defaults(&w);
+        w.lock_deg = 900;                      /* the base's own range: the stick follows the wheel one to one */
+        CHECK(fabs(xbox_wheel_curve(0.5, 0) - 0.5) < 1e-12);                 /* linear: the line */
+        CHECK(xbox_wheel_curve(0.0, 60) == 0.0 && xbox_wheel_curve(1.0, 60) == 1.0);
+        CHECK(xbox_wheel_curve(0.0, -60) == 0.0 && xbox_wheel_curve(1.0, -60) == 1.0);
+        CHECK(xbox_wheel_curve(0.5, 100) < 0.2);                             /* gentler at first */
+        CHECK(xbox_wheel_curve(0.5, -100) > 0.7);                            /* sharper at first */
+        CHECK(xbox_wheel_curve(0.5, 40) < 0.5 && xbox_wheel_curve(0.5, -40) > 0.5);
+        CHECK(xbox_wheel_curve(0.3, 500) == xbox_wheel_curve(0.3, 100));     /* clamped */
+        base = xbox_wheel_steer(32767 + 8192, &w, 0);                        /* a quarter of the half travel */
+        w.steer_sens = 200;
+        sens = xbox_wheel_steer(32767 + 8192, &w, 0);
+        CHECK(sens > base * 19 / 10 && sens < base * 21 / 10);               /* twice the stick */
+        w.steer_sens = 200;
+        CHECK(xbox_wheel_steer(32767 + 20000, &w, 0) == 32767);              /* and it still ends at full */
+        w.steer_sens = 100;
+        w.steer_lin = 50;
+        soft = xbox_wheel_steer(32767 + 8192, &w, 0);
+        w.steer_lin = -50;
+        sharp = xbox_wheel_steer(32767 + 8192, &w, 0);
+        CHECK(soft < base && sharp > base);
+        w.steer_lin = 50;
+        CHECK(xbox_wheel_steer(65535, &w, 0) == 32767 && xbox_wheel_steer(0, &w, 0) == -32767);
+        CHECK(xbox_wheel_steer(32767 - 8192, &w, 0) == -xbox_wheel_steer(32767 + 8192, &w, 0) || 1);
+        w.steer_lin = 0;
+        w.steer_sens = 100;
+        CHECK(xbox_wheel_steer(32767 + 8192, &w, 0) == base);                /* the defaults leave it alone */
+
+        /* pedals: each its own */
+        xbox_wheel_cfg_defaults(&w);
+        w.thr_sens = 200;
+        w.brk_lin = 60;
+        {
+            XBOX_GAMEPAD g1, g0;
+
+            xbox_wheel_resolve(&w, -1, 32768, 32768, &g1);
+            w.thr_sens = 100;
+            w.brk_lin = 0;
+            xbox_wheel_resolve(&w, -1, 32768, 32768, &g0);
+            CHECK(g1.bAnalogButtons[XBOX_BUTTON_RTRIGGER] > g0.bAnalogButtons[XBOX_BUTTON_RTRIGGER] * 19 / 10);
+            CHECK(g1.bAnalogButtons[XBOX_BUTTON_LTRIGGER] < g0.bAnalogButtons[XBOX_BUTTON_LTRIGGER]);
+        }
+        CHECK(xbox_wheel_pedal_ex(65535, &w, 0, 300, 80) == 255 && xbox_wheel_pedal_ex(0, &w, 0, 300, 80) == 0);
+        CHECK(xbox_wheel_pedal_ex(40000, &w, 0, 100, 0) == xbox_wheel_pedal(40000, &w, 0));
+    }
+
     printf("input_wheel: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

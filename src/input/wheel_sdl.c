@@ -623,6 +623,12 @@ void xbox_InputWheelInit(void)
     g_cfg.pedal_dead = recomp_env_double(RENV_INPUT_WHEEL_DEADZONE, XBOX_WHEEL_PEDAL_DEAD_DEFAULT);
     g_cfg.steer_dead = recomp_env_double(RENV_INPUT_WHEEL_STEER_DEAD, 0.0);
     g_cfg.steer_skip = recomp_env_double(RENV_INPUT_WHEEL_STEER_SKIP, 0.0);
+    g_cfg.steer_sens = recomp_env_double(RENV_INPUT_WHEEL_STEER_SENS, 100.0);
+    g_cfg.steer_lin = recomp_env_double(RENV_INPUT_WHEEL_STEER_LIN, 0.0);
+    g_cfg.thr_sens = recomp_env_double(RENV_INPUT_WHEEL_THROTTLE_SENS, 100.0);
+    g_cfg.thr_lin = recomp_env_double(RENV_INPUT_WHEEL_THROTTLE_LIN, 0.0);
+    g_cfg.brk_sens = recomp_env_double(RENV_INPUT_WHEEL_BRAKE_SENS, 100.0);
+    g_cfg.brk_lin = recomp_env_double(RENV_INPUT_WHEEL_BRAKE_LIN, 0.0);
     g_log = recomp_env_on(RENV_INPUT_WHEEL_LOG);
     g_spring_pct = recomp_env_double(RENV_INPUT_WHEEL_FFB_SPRING, 0.0);
     if (g_spring_pct > XBOX_WHEEL_SPRING_MAX) {
