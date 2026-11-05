@@ -1,4 +1,5 @@
 /* The racing wheel settings' ids (the Wheel page), included inside the xs_id enum of xbox_settings.h. Kept in files of their own so the wheel work stays out of the shared ones: the rows are in xbox_settings_wheel_set.inc, the labels in overlay_wheel_meta.inc. */
+    XS_WHEEL_ENABLE,        /* the Wheel page's on/off: off leaves the wheel unused (and hides the Wheel test page) */
     XS_WHEEL_RANGE,         /* the Wheel page: a racing wheel's response and force feedback (input/wheel_pad.h); read at start */
     XS_WHEEL_LOCK,
     XS_WHEEL_STEER_SENS,

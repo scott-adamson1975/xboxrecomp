@@ -123,6 +123,13 @@ static void wheel_bind_clear(int idx)
     snprintf(s_wb_msg, sizeof s_wb_msg, "%s: cleared. Applies after a restart.", k_wbind[idx].label);
 }
 
+/* The Wheel test page is there only while a wheel is on and its steering axis is bound. */
+static bool wheel_page_shown(int page)
+{
+    (void)page;
+    return xbox_SettingValue(XS_WHEEL_ENABLE) && xbox_SettingsText("wheel.bind_steer", NULL)[0] != 0;
+}
+
 static bool wheel_cancel_capture()
 {
     if (s_wb_cap < 0)
@@ -219,6 +226,11 @@ static int wheel_rows(int page, Row *r)
     if (page == P_WHEEL) {
         const bool steer = xbox_SettingsText("wheel.bind_steer", NULL)[0] != 0;
 
+        WSET(XS_WHEEL_ENABLE);
+        if (!xbox_SettingValue(XS_WHEEL_ENABLE)) {
+            WINFO("The wheel is off: it is not used, whatever is set up. Turn Use the wheel on (applies after a restart) to see its settings.");
+            return n;
+        }
         if (s_wb_msg[0])
             WINFO(s_wb_msg);
         if (!api)

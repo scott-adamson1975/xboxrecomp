@@ -628,6 +628,14 @@ void xbox_InputWheelInit(void)
     if (g_on)
         return;
     xbox_InputWheelProbeRegister();     /* the settings overlay can list the joysticks and capture a binding, wheel bound or not */
+    {
+        const char *en = recomp_env(RENV_INPUT_WHEEL_ENABLE);
+
+        if (en && *en == '0') {
+            XR_NOTICE("[WHEEL] off (Use the wheel is off)\n");
+            return;
+        }
+    }
     xbox_wheel_cfg_defaults(&g_cfg);
     any |= bind_env(&g_cfg.steer, RENV_INPUT_WHEEL_STEER, "RECOMP_WHEEL_STEER");
     any |= bind_env(&g_cfg.throttle, RENV_INPUT_WHEEL_THROTTLE, "RECOMP_WHEEL_THROTTLE");

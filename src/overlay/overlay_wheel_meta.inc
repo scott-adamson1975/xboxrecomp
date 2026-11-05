@@ -1,4 +1,5 @@
 /* The racing wheel settings' labels and hints, included inside the k_meta[] initialiser of overlay_ui.cpp, in xbox_settings_wheel_ids.inc's order. */
+    /* XS_WHEEL_ENABLE */ { XS_WHEEL_ENABLE, "Use the wheel", "On: the racing wheel and pedals set up below are used. Off: they are ignored (the pad and keyboard play as usual) and the Wheel test page is hidden. Applies after a restart.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_WHEEL_RANGE */ { XS_WHEEL_RANGE, "Wheel rotation", "How far the base turns from one end to the other, in degrees (900 for a Thrustmaster T818). The stops and the spring follow it.", 5, FMT_DEG, NULL, 0 },
     /* XS_WHEEL_LOCK */ { XS_WHEEL_LOCK, "Game lock", "The turn that gives full steering, lock to lock, in degrees. Smaller is quicker: 360 reaches full lock at 180 degrees each way. With the wheel rotation at 900 and this at 540, full lock is at 270 degrees each way.", 10, FMT_DEG, NULL, 0 },
     /* XS_WHEEL_STEER_SENS */ { XS_WHEEL_STEER_SENS, "Steering sensitivity", "How much the car steers for a given turn, on top of the game lock. 100% is as the lock gives it; 200% reaches full steering at half the turn.", 5, FMT_RAWPCT, NULL, 0 },

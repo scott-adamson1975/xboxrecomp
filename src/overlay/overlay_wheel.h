@@ -14,6 +14,7 @@ static bool wheel_cancel_capture();                              /* B / Esc: end
 static void wheel_bind_activate(int idx);                        /* Enter / A / a tap on a binding row */
 static void wheel_bind_clear(int idx);                           /* Backspace / Y */
 static bool wheel_hint(const Row &r, char *hint, size_t n);      /* the hint of a binding or a live row; true: attention colour */
+static bool wheel_page_shown(int page);                          /* the Wheel test page only while a wheel is on and set up */
 static void wheel_close();                                       /* the overlay is shut: the handles go */
 
 #endif

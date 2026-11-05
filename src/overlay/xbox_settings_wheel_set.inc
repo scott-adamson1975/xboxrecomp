@@ -1,4 +1,5 @@
 /* The racing wheel settings' rows, included inside the s_set[] initialiser of xbox_settings.c (see xbox_settings_wheel_ids.inc). */
+    [XS_WHEEL_ENABLE] = SETTING("wheel.enable", XS_BOOL, XS_RESTART, RENV_INPUT_WHEEL_ENABLE, NULL, NULL, 0, 1, 1),
     [XS_WHEEL_RANGE] = SETTING("wheel.range", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_RANGE, NULL, NULL, 180, 1440, 900),
     [XS_WHEEL_LOCK] = SETTING("wheel.lock", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_LOCK, NULL, NULL, 90, 1440, 540),
     [XS_WHEEL_STEER_SENS] = SETTING_STEP("wheel.steer_sensitivity", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_STEER_SENS, 25, 300, 100, 5),

@@ -1030,6 +1030,19 @@ struct Row {
 };
 
 #include "overlay_wheel.h"           /* the Wheel and Wheel test pages (overlay_wheel.inc) */
+
+static bool page_shown(int p) { return p != P_WHEELTEST || wheel_page_shown(p); }
+/* The next page in a direction that is shown. */
+static int page_step(int from, int dir)
+{
+    int p = from;
+    for (int i = 0; i < P_COUNT; i++) {
+        p = (p + dir + P_COUNT) % P_COUNT;
+        if (page_shown(p))
+            return p;
+    }
+    return from;
+}
 #include "overlay_simhub.h"          /* the SimHub page (overlay_simhub.inc) */
 
 /* The Advanced page's three lines on what reaches the glass (below, with
@@ -4123,7 +4136,7 @@ static void draw_header(ImDrawList *dl)
             ImGui::PushID(k + 100);
             ImGui::InvisibleButton("##pg", ImVec2(x1 - x0, sz * 1.2f));
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-                s_page = (s_page + (k ? 1 : -1) + P_COUNT) % P_COUNT;
+                s_page = page_step(s_page, k ? 1 : -1);
                 menusnd_play(XBOX_OVERLAY_SND_PAGE);
                 rows_in_page();
                 s_scroll_to_sel = true;
@@ -4142,6 +4155,8 @@ static void draw_header(ImDrawList *dl)
         const float gap = LY.tab * 0.9f, cy = y0 + th * 0.5f;
         float x = LY.cx + 0.094f * LY.cw;
         for (int i = 0; i < P_COUNT; i++) {
+            if (!page_shown(i))
+                continue;
             const char *t = caps(k_page_name[i]);
             const float w = tw(LY.tab, t);
             ImGui::SetCursorScreenPos(ImVec2(x - gap * 0.5f, y0));
@@ -4775,7 +4790,7 @@ static void build_pages_inner()
         s_rows_t0 = 0;
     /* A page change shows from the next frame. */
     if (s_page_delta) {
-        s_page = (s_page + (s_page_delta > 0 ? 1 : -1) + P_COUNT) % P_COUNT;
+        s_page = page_step(s_page, s_page_delta > 0 ? 1 : -1);
         s_page_delta = 0;
         menusnd_play(XBOX_OVERLAY_SND_PAGE);
         rows_in_page();
