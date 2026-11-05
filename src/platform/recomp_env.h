@@ -468,7 +468,7 @@ extern "C" {
     X(HR_SPIN,           DEBUG, "hr_spin",         NULL,                       "=0: BO-241: while frames are held to the host grid (graphics.high_refresh) the executor spins instead of napping when idle (waiting for the title's next kick, holding a frame for its edge), so the CPU keeps its clock up; =0 naps as before (default on, with the grid only)") \
     X(PUMP_STALL_AFTER,  DEBUG, "pump_stall_after", NULL,                      "=s: seconds after the first frame before pump_stall starts (default 0)") \
     X(SIMHUB,            CONFIG, "RECOMP_SIMHUB",            NULL, "1: send the player's car to SimHub over UDP, in Forza Motorsport 7's Data Out format (pick that game in SimHub). The Settings overlay's SimHub page") \
-    X(SIMHUB_PORT,       CONFIG, "RECOMP_SIMHUB_PORT",       NULL, "the UDP port the SimHub telemetry goes to (default 5300: the port SimHub listens on for Forza)") \
+    X(SIMHUB_PORT,       CONFIG, "RECOMP_SIMHUB_PORT",       NULL, "the UDP port the SimHub telemetry goes to (default 8000: the port Forza Motorsport 7 uses)") \
     X(SIMHUB_HOST,       CONFIG, "RECOMP_SIMHUB_HOST",       NULL, "the IPv4 address the SimHub telemetry goes to (default 127.0.0.1: this computer)") \
     X(SIMHUB_RPM,        CONFIG, "RECOMP_SIMHUB_RPM",        NULL, "0: send rpm 0 and gear 1 to SimHub instead of values made up from the speed (the game has neither)") \
     X(SIMHUB_GRAVITY,    CONFIG, "RECOMP_SIMHUB_GRAVITY",    NULL, "1: add 9.81 m/s2 to the vertical acceleration sent to SimHub, if it expects gravity in it") \
