@@ -112,6 +112,27 @@ typedef enum {
     XS_GRAPHICS_TEXUP_PRELOAD, /* BO-272: the upscaler works through the loading screen and countdown, on as shipped */
     XS_GRAPHICS_SOFTBODY,    /* a title's soft-body vehicle damage (drawn only), off as shipped; read at start */
     XS_GAME_LANGUAGE,        /* the dashboard language the kernel reports (XC_LANGUAGE); a row only where the title has more than one */
+    XS_WHEEL_RANGE,         /* the Wheel page: a racing wheel's response and force feedback (input/wheel_pad.h); read at start */
+    XS_WHEEL_LOCK,
+    XS_WHEEL_STEER_SENS,
+    XS_WHEEL_STEER_LIN,
+    XS_WHEEL_STEER_DEAD,
+    XS_WHEEL_STEER_SKIP,
+    XS_WHEEL_PEDAL_DEAD,
+    XS_WHEEL_THROTTLE_SENS,
+    XS_WHEEL_THROTTLE_LIN,
+    XS_WHEEL_BRAKE_SENS,
+    XS_WHEEL_BRAKE_LIN,
+    XS_WHEEL_FFB_SPRING,
+    XS_WHEEL_FFB_SPEED,
+    XS_WHEEL_FFB_REST,
+    XS_WHEEL_FFB_RACE_ONLY,
+    XS_WHEEL_FFB_AIR,
+    XS_WHEEL_FFB_DRIFT,
+    XS_WHEEL_RUMBLE,
+    XS_WHEEL_ENGINE,
+    XS_WHEEL_KICK,
+    XS_WHEEL_KICK_FLIP,
 #if defined(__ANDROID__)
     XS_INPUT_VIBRATION,      /* pad motors or the device's vibrator (android_vibration.c) */
     XS_INPUT_TOUCH,          /* the on-screen controls: auto / always / off (touch_pad.h) */

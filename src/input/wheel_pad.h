@@ -28,6 +28,7 @@
 #ifndef XBOX_INPUT_WHEEL_PAD_H
 #define XBOX_INPUT_WHEEL_PAD_H
 
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -73,6 +74,10 @@ typedef struct xbox_wheel_cfg {
     double pedal_dead;   /* pedal deadzone, percent of travel (default 4) */
     double steer_dead;   /* steering deadzone, percent of the stick's travel, after the lock (default 0) */
     double steer_skip;   /* the band the title ignores around the stick's centre, percent: the wheel jumps over it (default 0) */
+    double steer_sens;   /* steering sensitivity, percent (default 100): the lock's stick travel times this */
+    double steer_lin;    /* steering linearity, -100..100 (default 0, linear) */
+    double thr_sens, thr_lin;      /* the throttle pedal's, as the steering's */
+    double brk_sens, brk_lin;      /* the brake pedal's */
 } xbox_wheel_cfg;
 
 #define XBOX_WHEEL_RANGE_DEFAULT 900.0
@@ -89,6 +94,7 @@ static inline void xbox_wheel_cfg_defaults(xbox_wheel_cfg *c)
     c->range_deg = XBOX_WHEEL_RANGE_DEFAULT;
     c->lock_deg = XBOX_WHEEL_LOCK_DEFAULT;
     c->pedal_dead = XBOX_WHEEL_PEDAL_DEAD_DEFAULT;
+    c->steer_sens = c->thr_sens = c->brk_sens = 100.0;
 }
 
 /* "044F:B696:0" or "044F:B6FC:2!". Returns 1 and fills *b, or 0 and leaves
@@ -136,6 +142,20 @@ static inline uint32_t xbox_wheel_axis_u16(int16_t v)
     return (uint32_t)((int)v + 32768);
 }
 
+/* A response curve over 0..1: linearity 0 is the straight line; above 0 the output stays low at first and rises toward the
+ * end (a gentler start: m^e with e up to 2.5), below 0 it rises quickly at first (e down to 0.4). The ends stay 0 and 1. */
+static inline double xbox_wheel_curve(double m, double lin)
+{
+    double e;
+
+    if (lin > -1e-9 && lin < 1e-9)
+        return m;
+    lin = xbox_wheel_clamp(lin, -100.0, 100.0) / 100.0;
+    m = xbox_wheel_clamp(m, 0.0, 1.0);
+    e = lin > 0 ? 1.0 + 1.5 * lin : 1.0 / (1.0 - 1.5 * lin);
+    return pow(m, e);
+}
+
 /* The steering axis (0..65535, centre 32767.5) as the left stick's X.
  * range and lock are degrees: a base that turns 900 degrees lock to lock
  * with a lock of 540 reaches full deflection at 270 degrees each way. A lock
@@ -156,11 +176,12 @@ static inline int16_t xbox_wheel_steer(uint32_t raw, const xbox_wheel_cfg *c, in
         return 0;
     if (invert)
         n = -n;
-    n = xbox_wheel_clamp(n * gain, -1.0, 1.0);
+    n = xbox_wheel_clamp(n * gain * (c->steer_sens > 0 ? c->steer_sens / 100.0 : 1.0), -1.0, 1.0);
     m = n < 0 ? -n : n;
     if (m <= d)
         return 0;
     m = (m - d) / (1.0 - d);
+    m = xbox_wheel_curve(m, c->steer_lin);
     if (c->steer_skip > 0) {
         /* The title ignores a band around the stick's centre (a pad stick has
          * play): the first degrees of a wheel would do nothing. Start just
@@ -178,7 +199,7 @@ static inline int16_t xbox_wheel_steer(uint32_t raw, const xbox_wheel_cfg *c, in
 /* A pedal axis (0..65535) as a trigger, 0..255. Rest is 0 unless invert.
  * Inside the deadzone it reads 0; beyond it the travel is stretched so full
  * stays 255. */
-static inline uint8_t xbox_wheel_pedal(uint32_t raw, const xbox_wheel_cfg *c, int invert)
+static inline uint8_t xbox_wheel_pedal_ex(uint32_t raw, const xbox_wheel_cfg *c, int invert, double sens, double lin)
 {
     double v = (double)raw / 65535.0;
     double d = xbox_wheel_clamp(c->pedal_dead, 0, 95) / 100.0;
@@ -189,7 +210,14 @@ static inline uint8_t xbox_wheel_pedal(uint32_t raw, const xbox_wheel_cfg *c, in
     if (v <= d)
         return 0;
     v = (v - d) / (1.0 - d);
+    v = xbox_wheel_clamp(v * (sens > 0 ? sens / 100.0 : 1.0), 0.0, 1.0);    /* the sensitivity: full at less travel */
+    v = xbox_wheel_curve(v, lin);
     return (uint8_t)(v * 255.0 + 0.5);
+}
+
+static inline uint8_t xbox_wheel_pedal(uint32_t raw, const xbox_wheel_cfg *c, int invert)
+{
+    return xbox_wheel_pedal_ex(raw, c, invert, 100.0, 0.0);
 }
 
 /* Pedals that report nothing. A pedal box that has not started (unpowered load
@@ -214,10 +242,10 @@ static inline void xbox_wheel_resolve(const xbox_wheel_cfg *c, int64_t steer,
         out->sThumbLX = xbox_wheel_steer((uint32_t)steer, c, c->steer.invert);
     if (throttle >= 0)
         out->bAnalogButtons[XBOX_BUTTON_RTRIGGER] =
-            xbox_wheel_pedal((uint32_t)throttle, c, c->throttle.invert);
+            xbox_wheel_pedal_ex((uint32_t)throttle, c, c->throttle.invert, c->thr_sens, c->thr_lin);
     if (brake >= 0)
         out->bAnalogButtons[XBOX_BUTTON_LTRIGGER] =
-            xbox_wheel_pedal((uint32_t)brake, c, c->brake.invert);
+            xbox_wheel_pedal_ex((uint32_t)brake, c, c->brake.invert, c->brk_sens, c->brk_lin);
 }
 
 /* The wheel's buttons and hat onto the pad xbox_wheel_resolve made. held[i]

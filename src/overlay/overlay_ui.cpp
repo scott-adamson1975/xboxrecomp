@@ -124,9 +124,9 @@ static int s_steps[D_COUNT];
 static int s_activate, s_back, s_page_delta, s_reset;
 
 /* The page and the row on each. */
-enum { P_DISPLAY, P_GRAPHICS, P_AUDIO, P_INPUT, P_POWER, P_ADVANCED, P_COUNT };
+enum { P_DISPLAY, P_GRAPHICS, P_AUDIO, P_INPUT, P_WHEEL, P_POWER, P_ADVANCED, P_COUNT };
 static const char *const k_page_name[P_COUNT] = {
-    "Display", "Graphics", "Audio", "Input", "Power", "Advanced"
+    "Display", "Graphics", "Audio", "Input", "Wheel", "Power", "Advanced"
 };
 static int s_page;
 static int s_sel[P_COUNT];
@@ -168,7 +168,7 @@ static volatile uint32_t s_presents;
 
 /* ── rows ──────────────────────────────────────────────────────────── */
 
-enum { FMT_PLAIN, FMT_PERCENT, FMT_PERCENT_OF_MAX, FMT_TIMES, FMT_GAIN, FMT_NITS };
+enum { FMT_PLAIN, FMT_PERCENT, FMT_PERCENT_OF_MAX, FMT_TIMES, FMT_GAIN, FMT_NITS, FMT_RAWPCT, FMT_RAWPCT1, FMT_DEG, FMT_MPS, FMT_SIGNED };
 
 struct Meta {
     xs_id id;                         /* its own index: checked below */
@@ -292,6 +292,27 @@ static constexpr Meta k_meta[XS_COUNT] = {
     /* XS_GRAPHICS_TEXUP_PRELOAD */ { XS_GRAPHICS_TEXUP_PRELOAD, "Upscale while loading", "Does most of the sharpening during the loading screen and the countdown, so the first race on a new track has less of it to do; a fast PC can leave it off.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GRAPHICS_SOFTBODY */  { XS_GRAPHICS_SOFTBODY, "Soft-body damage", "Cars crumple, tear and bend where they are hit, with the game's own sparks and debris where metal rips, instead of only losing panels. Drawn only: handling and the race are unchanged. Costs CPU in big pile-ups. Applies after a restart.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GAME_LANGUAGE */      { XS_GAME_LANGUAGE, "Language", "The language of the game's text, speech and films, as an Xbox set to that language would show them. Only the languages on your disc are offered. Applies after a restart.", 1, FMT_PLAIN, n_language, 0 },
+    /* XS_WHEEL_RANGE */ { XS_WHEEL_RANGE, "Wheel rotation", "How far the base turns from one end to the other, in degrees (900 for a Thrustmaster T818). The stops and the spring follow it.", 5, FMT_DEG, NULL, 0 },
+    /* XS_WHEEL_LOCK */ { XS_WHEEL_LOCK, "Game lock", "The turn that gives full steering, lock to lock, in degrees. Smaller is quicker: 360 reaches full lock at 180 degrees each way. With the wheel rotation at 900 and this at 540, full lock is at 270 degrees each way.", 10, FMT_DEG, NULL, 0 },
+    /* XS_WHEEL_STEER_SENS */ { XS_WHEEL_STEER_SENS, "Steering sensitivity", "How much the car steers for a given turn, on top of the game lock. 100% is as the lock gives it; 200% reaches full steering at half the turn.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_STEER_LIN */ { XS_WHEEL_STEER_LIN, "Steering linearity", "0 steers in a straight line with the wheel. Above 0 the car steers less around the middle and more near the ends (calmer on a straight); below 0 it steers more around the middle (sharper).", 5, FMT_SIGNED, NULL, 0 },
+    /* XS_WHEEL_STEER_DEAD */ { XS_WHEEL_STEER_DEAD, "Steering deadzone", "How far the wheel can turn from the middle before the car steers, in percent of the travel. Stops a wheel that rests a little off centre from creeping.", 0.5, FMT_RAWPCT1, NULL, 0 },
+    /* XS_WHEEL_STEER_SKIP */ { XS_WHEEL_STEER_SKIP, "Game deadzone skip", "The game ignores a band around the middle of a stick, so the first degrees of a wheel would do nothing. This jumps over that band, in percent. 11 suits this game; 0 leaves it.", 1, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_PEDAL_DEAD */ { XS_WHEEL_PEDAL_DEAD, "Pedal deadzone", "How far a pedal can be pressed and still count as released, in percent of its travel.", 1, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_THROTTLE_SENS */ { XS_WHEEL_THROTTLE_SENS, "Throttle sensitivity", "How far the pedal has to go for full throttle. 100% is the whole travel; 200% is full at half of it.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_THROTTLE_LIN */ { XS_WHEEL_THROTTLE_LIN, "Throttle linearity", "0 is a straight line. Above 0 the throttle comes in gently at first; below 0 it comes in sharply at first.", 5, FMT_SIGNED, NULL, 0 },
+    /* XS_WHEEL_BRAKE_SENS */ { XS_WHEEL_BRAKE_SENS, "Brake sensitivity", "How far the pedal has to go for full braking. 100% is the whole travel; 200% is full at half of it.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_BRAKE_LIN */ { XS_WHEEL_BRAKE_LIN, "Brake linearity", "0 is a straight line. Above 0 the brake bites gently at first; below 0 it bites hard at first.", 5, FMT_SIGNED, NULL, 0 },
+    /* XS_WHEEL_FFB_SPRING */ { XS_WHEEL_FFB_SPRING, "Centring spring", "Force feedback: the wheel pulls back to the middle, this percent of the base's force at the end of the game lock. 0 is off, and with it everything below. A 10 Nm base is strong: start low, hands on the wheel.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_FFB_SPEED */ { XS_WHEEL_FFB_SPEED, "Spring follows speed", "The speed, in metres per second, at which the spring has its whole strength; slower it is weaker, down to the rest level at a standstill. 0 keeps it the same at every speed. 40 is about 90 mph.", 5, FMT_MPS, NULL, 0 },
+    /* XS_WHEEL_FFB_REST */ { XS_WHEEL_FFB_REST, "Spring at a standstill", "With the spring following the speed: the percent of its strength left when the car is stopped.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_FFB_RACE_ONLY */ { XS_WHEEL_FFB_RACE_ONLY, "Spring only in a race", "The spring fades out in menus, pauses and the results, and back in when a race runs.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_WHEEL_FFB_AIR */ { XS_WHEEL_FFB_AIR, "Spring in the air", "The percent of the spring left while the car is in the air. 0 lets the wheel go free on a jump.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_FFB_DRIFT */ { XS_WHEEL_FFB_DRIFT, "Spring in a drift", "The percent of the spring left in a full drift, so the wheel goes light as the front end slips. 100 leaves the spring as it is.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_RUMBLE */ { XS_WHEEL_RUMBLE, "Rumble and jolts", "The game's own rumble, and the shake of a hit or a landing, as a vibration on the wheel: this percent of the base's force at the strongest. Needs the spring above 0.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_ENGINE */ { XS_WHEEL_ENGINE, "Engine vibration", "A light vibration while racing, a little at a standstill and more with speed. Needs the spring above 0.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_KICK */ { XS_WHEEL_KICK, "Hit weight", "When the car is hit, a weight on the wheel toward the side it is hit from: this percent of the base's force at the hardest hit. Needs the spring above 0.", 5, FMT_RAWPCT, NULL, 0 },
+    /* XS_WHEEL_KICK_FLIP */ { XS_WHEEL_KICK_FLIP, "Hit weight: other way", "Turn on if the weight of a hit comes out on the wrong side.", 1, FMT_PLAIN, NULL, 0 },
 #if defined(__ANDROID__)
     /* XS_INPUT_VIBRATION */    { XS_INPUT_VIBRATION, "Vibration", "Where rumble goes. Auto uses this device's vibrator while its built-in controls are in use. External controllers don't rumble on Android; This device vibrates anyway.", 1, FMT_PLAIN, n_vibration, 0 },
     /* XS_INPUT_TOUCH */        { XS_INPUT_TOUCH, "Touch controls", "On-screen controls. In a race: steer with the left thumb anywhere on the left half, GAS, BRAKE and BOOST on the right (BOOST keeps accelerating). In menus: a d-pad and A B X Y. Pause and this menu are at the top, left of centre. Auto hides them while a controller is used and shows them again when you touch the screen.", 1, FMT_PLAIN, n_touch, 0 },
@@ -1228,6 +1249,24 @@ static int page_rows(int page, Row *r)
 #endif
         ACT(A_RESET_PAGE, "Reset this page to the defaults");
         break;
+    case P_WHEEL:
+        if (recomp_env(RENV_INPUT_WHEEL_STEER) && *recomp_env(RENV_INPUT_WHEEL_STEER))
+            INFO("A wheel is set up. Changes here apply after a restart.");
+        else
+            INFO("No wheel is set up yet (RECOMP_WHEEL_STEER and the pedals' variables). The rows below apply once one is.");
+        SET(XS_WHEEL_RANGE); SET(XS_WHEEL_LOCK);
+        SET(XS_WHEEL_STEER_SENS); SET(XS_WHEEL_STEER_LIN); SET(XS_WHEEL_STEER_DEAD); SET(XS_WHEEL_STEER_SKIP);
+        SET(XS_WHEEL_PEDAL_DEAD);
+        SET(XS_WHEEL_THROTTLE_SENS); SET(XS_WHEEL_THROTTLE_LIN);
+        SET(XS_WHEEL_BRAKE_SENS); SET(XS_WHEEL_BRAKE_LIN);
+        SET(XS_WHEEL_FFB_SPRING);
+        if (xbox_SettingValue(XS_WHEEL_FFB_SPRING) > 0) {
+            SET(XS_WHEEL_FFB_SPEED); SET(XS_WHEEL_FFB_REST); SET(XS_WHEEL_FFB_RACE_ONLY);
+            SET(XS_WHEEL_FFB_AIR); SET(XS_WHEEL_FFB_DRIFT);
+            SET(XS_WHEEL_RUMBLE); SET(XS_WHEEL_ENGINE); SET(XS_WHEEL_KICK); SET(XS_WHEEL_KICK_FLIP);
+        }
+        ACT(A_RESET_PAGE, "Reset this page to the defaults");
+        break;
     case P_POWER:
 #if !defined(__linux__)
         {
@@ -1573,6 +1612,11 @@ static void value_text(xs_id id, char *out, size_t n)
         case FMT_PERCENT:        snprintf(out, n, "%d%%", (int)floor(v * 100.0 + 0.5)); break;
         case FMT_PERCENT_OF_MAX: snprintf(out, n, "%d%%", (int)floor(v / s->max * 100.0 + 0.5)); break;
         case FMT_TIMES:          snprintf(out, n, "%dx", (int)v); break;
+        case FMT_RAWPCT:         snprintf(out, n, "%d%%", (int)floor(v + 0.5)); break;      /* a value already in percent */
+        case FMT_RAWPCT1:        snprintf(out, n, "%.1f%%", v); break;
+        case FMT_DEG:            snprintf(out, n, "%d degrees", (int)floor(v + 0.5)); break;
+        case FMT_MPS:            if (v <= 0.0) snprintf(out, n, "Off"); else snprintf(out, n, "%d m/s", (int)floor(v + 0.5)); break;
+        case FMT_SIGNED:         snprintf(out, n, v > 0.0 ? "+%d" : "%d", (int)floor(v + (v < 0 ? -0.5 : 0.5))); break;
         case FMT_NITS:
             {
                 /* BO-244: nits on every platform (macOS outputs HDR10 too). */
