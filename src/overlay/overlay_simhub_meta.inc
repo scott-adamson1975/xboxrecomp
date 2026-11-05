@@ -1,0 +1,8 @@
+/* The SimHub telemetry settings' labels and hints, included inside the k_meta[] initialiser of overlay_ui.cpp, in xbox_settings_simhub_ids.inc's order. */
+    /* XS_SIMHUB_ENABLE */ { XS_SIMHUB_ENABLE, "Send to SimHub", "Sends the car's motion to SimHub over UDP, in Forza Motorsport 7's Data Out format: pick that game in SimHub. For dashboards, LEDs, bass shakers and motion platforms. Off sends nothing and runs nothing.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_SIMHUB_PORT */ { XS_SIMHUB_PORT, "UDP port", "The port the packets go to. It must match the port SimHub listens on for the Forza game (its game settings show it).", 10, FMT_PLAIN, NULL, 0 },
+    /* XS_SIMHUB_RPM */ { XS_SIMHUB_RPM, "Made-up rpm and gear", "Burnout 3 has no gearbox, so rpm and gear are made up from the speed (five bands) to give rev lights and engine shakers something to follow. Off sends rpm 0 and gear 1.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_SIMHUB_GRAVITY */ { XS_SIMHUB_GRAVITY, "Gravity in heave", "Adds 9.81 to the vertical acceleration. Turn it on if SimHub's motion preview shows a parked car falling.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_SIMHUB_FLIP_PITCH */ { XS_SIMHUB_FLIP_PITCH, "Flip pitch", "Turns the pitch the other way round, if braking lifts the nose in SimHub's preview.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_SIMHUB_FLIP_ROLL */ { XS_SIMHUB_FLIP_ROLL, "Flip roll", "Turns the roll the other way round, if a right turn leans left in SimHub's preview.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_SIMHUB_FLIP_YAW */ { XS_SIMHUB_FLIP_YAW, "Flip yaw", "Turns the heading the other way round.", 1, FMT_PLAIN, NULL, 0 },

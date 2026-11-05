@@ -124,9 +124,9 @@ static int s_steps[D_COUNT];
 static int s_activate, s_back, s_page_delta, s_reset;
 
 /* The page and the row on each. */
-enum { P_DISPLAY, P_GRAPHICS, P_AUDIO, P_INPUT, P_WHEEL, P_WHEELTEST, P_POWER, P_ADVANCED, P_COUNT };
+enum { P_DISPLAY, P_GRAPHICS, P_AUDIO, P_INPUT, P_WHEEL, P_WHEELTEST, P_SIMHUB, P_POWER, P_ADVANCED, P_COUNT };
 static const char *const k_page_name[P_COUNT] = {
-    "Display", "Graphics", "Audio", "Input", "Wheel", "Wheel test", "Power", "Advanced"
+    "Display", "Graphics", "Audio", "Input", "Wheel", "Wheel test", "SimHub", "Power", "Advanced"
 };
 static int s_page;
 static int s_sel[P_COUNT];
@@ -293,6 +293,7 @@ static constexpr Meta k_meta[XS_COUNT] = {
     /* XS_GRAPHICS_SOFTBODY */  { XS_GRAPHICS_SOFTBODY, "Soft-body damage", "Cars crumple, tear and bend where they are hit, with the game's own sparks and debris where metal rips, instead of only losing panels. Drawn only: handling and the race are unchanged. Costs CPU in big pile-ups. Applies after a restart.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GAME_LANGUAGE */      { XS_GAME_LANGUAGE, "Language", "The language of the game's text, speech and films, as an Xbox set to that language would show them. Only the languages on your disc are offered. Applies after a restart.", 1, FMT_PLAIN, n_language, 0 },
 #include "overlay_wheel_meta.inc"   /* the racing wheel settings: labels and hints */
+#include "overlay_simhub_meta.inc"   /* the SimHub telemetry settings: labels and hints */
 #if defined(__ANDROID__)
     /* XS_INPUT_VIBRATION */    { XS_INPUT_VIBRATION, "Vibration", "Where rumble goes. Auto uses this device's vibrator while its built-in controls are in use. External controllers don't rumble on Android; This device vibrates anyway.", 1, FMT_PLAIN, n_vibration, 0 },
     /* XS_INPUT_TOUCH */        { XS_INPUT_TOUCH, "Touch controls", "On-screen controls. In a race: steer with the left thumb anywhere on the left half, GAS, BRAKE and BOOST on the right (BOOST keeps accelerating). In menus: a d-pad and A B X Y. Pause and this menu are at the top, left of centre. Auto hides them while a controller is used and shows them again when you touch the screen.", 1, FMT_PLAIN, n_touch, 0 },
@@ -1029,6 +1030,7 @@ struct Row {
 };
 
 #include "overlay_wheel.h"           /* the Wheel and Wheel test pages (overlay_wheel.inc) */
+#include "overlay_simhub.h"          /* the SimHub page (overlay_simhub.inc) */
 
 /* The Advanced page's three lines on what reaches the glass (below, with
  * the frame-time graph). */
@@ -1235,6 +1237,9 @@ static int page_rows(int page, Row *r)
     case P_WHEEL:
     case P_WHEELTEST:
         n = wheel_rows(page, r);                  /* overlay_wheel.inc */
+        break;
+    case P_SIMHUB:
+        n = simhub_rows(page, r);                 /* overlay_simhub.inc */
         break;
     case P_POWER:
 #if !defined(__linux__)
@@ -3675,6 +3680,7 @@ static void gesture_scroll()
 }
 
 #include "overlay_wheel.inc"              /* the Wheel and Wheel test pages */
+#include "overlay_simhub.inc"             /* the SimHub page */
 
 /* One row. `fs` is the label's size, `rh` the pitch; the columns are the
  * layout's. */
