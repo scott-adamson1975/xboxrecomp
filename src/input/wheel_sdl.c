@@ -527,6 +527,28 @@ static void log_edges(wheel_dev *d)
     d->hat_prev = hat;
 }
 
+/* The Wheel test page (wheel_probe.h): what the game is given from the wheel now, worked out from the axes as they are (the title
+ * may be paused behind the overlay, so its poll is not waited for). 0 while no wheel is on. */
+int xbox_InputWheelLastOutput(int *steer, int *throttle, int *brake)
+{
+    XBOX_GAMEPAD pad;
+    int64_t s, t, b;
+
+    if (!g_on)
+        return 0;
+    s = axis_read(&g_cfg.steer);
+    t = axis_read(&g_cfg.throttle);
+    b = axis_read(&g_cfg.brake);
+    memset(&pad, 0, sizeof pad);
+    xbox_wheel_resolve(&g_cfg, s, t, b, &pad);
+    *steer = pad.sThumbLX;
+    *throttle = pad.bAnalogButtons[XBOX_BUTTON_RTRIGGER];
+    *brake = pad.bAnalogButtons[XBOX_BUTTON_LTRIGGER];
+    return 1;
+}
+
+extern void xbox_InputWheelProbeRegister(void);     /* wheel_probe_sdl.c */
+
 static int wheel_read(XBOX_GAMEPAD *out)
 {
     Uint32 now = SDL_GetTicks();
@@ -605,6 +627,7 @@ void xbox_InputWheelInit(void)
 
     if (g_on)
         return;
+    xbox_InputWheelProbeRegister();     /* the settings overlay can list the joysticks and capture a binding, wheel bound or not */
     xbox_wheel_cfg_defaults(&g_cfg);
     any |= bind_env(&g_cfg.steer, RENV_INPUT_WHEEL_STEER, "RECOMP_WHEEL_STEER");
     any |= bind_env(&g_cfg.throttle, RENV_INPUT_WHEEL_THROTTLE, "RECOMP_WHEEL_THROTTLE");

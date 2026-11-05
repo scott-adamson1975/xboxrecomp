@@ -215,27 +215,7 @@ static xs_setting s_set[XS_COUNT] = {
     [XS_AUDIO_CUSTOM_AT_START] = SETTING("audio.custom_music_at_start", XS_BOOL, 0, RENV_AUDIO_CUSTOM_AT_START, NULL, NULL, 0, 0, 1),
     /* Read by the kernel when the title asks, early in boot: a restart. */
     [XS_GAME_LANGUAGE]      = SETTING("game.language", XS_CHOICE, XS_RESTART, RENV_GAME_LANGUAGE, k_language, NULL, 0, 0, 0),
-    [XS_WHEEL_RANGE] = SETTING("wheel.range", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_RANGE, NULL, NULL, 180, 1440, 900),
-    [XS_WHEEL_LOCK] = SETTING("wheel.lock", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_LOCK, NULL, NULL, 90, 1440, 540),
-    [XS_WHEEL_STEER_SENS] = SETTING_STEP("wheel.steer_sensitivity", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_STEER_SENS, 25, 300, 100, 5),
-    [XS_WHEEL_STEER_LIN] = SETTING("wheel.steer_linearity", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_STEER_LIN, NULL, NULL, -100, 100, 0),
-    [XS_WHEEL_STEER_DEAD] = SETTING_STEP("wheel.steer_deadzone", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_STEER_DEAD, 0, 30, 0, 0.5),
-    [XS_WHEEL_STEER_SKIP] = SETTING_STEP("wheel.steer_skip", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_STEER_SKIP, 0, 50, 0, 1),
-    [XS_WHEEL_PEDAL_DEAD] = SETTING_STEP("wheel.pedal_deadzone", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_DEADZONE, 0, 30, 4, 1),
-    [XS_WHEEL_THROTTLE_SENS] = SETTING_STEP("wheel.throttle_sensitivity", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_THROTTLE_SENS, 25, 300, 100, 5),
-    [XS_WHEEL_THROTTLE_LIN] = SETTING("wheel.throttle_linearity", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_THROTTLE_LIN, NULL, NULL, -100, 100, 0),
-    [XS_WHEEL_BRAKE_SENS] = SETTING_STEP("wheel.brake_sensitivity", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_BRAKE_SENS, 25, 300, 100, 5),
-    [XS_WHEEL_BRAKE_LIN] = SETTING("wheel.brake_linearity", XS_INT, XS_RESTART, RENV_INPUT_WHEEL_BRAKE_LIN, NULL, NULL, -100, 100, 0),
-    [XS_WHEEL_FFB_SPRING] = SETTING_STEP("wheel.ffb_spring", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_FFB_SPRING, 0, 100, 0, 5),
-    [XS_WHEEL_FFB_SPEED] = SETTING_STEP("wheel.ffb_speed", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_FFB_SPEED, 0, 80, 0, 5),
-    [XS_WHEEL_FFB_REST] = SETTING_STEP("wheel.ffb_rest", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_FFB_REST, 0, 100, 30, 5),
-    [XS_WHEEL_FFB_RACE_ONLY] = SETTING("wheel.ffb_race_only", XS_BOOL, XS_RESTART, RENV_INPUT_WHEEL_FFB_RACE_ONLY, NULL, NULL, 0, 0, 0),
-    [XS_WHEEL_FFB_AIR] = SETTING_STEP("wheel.ffb_air", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_FFB_AIR, 0, 100, 0, 5),
-    [XS_WHEEL_FFB_DRIFT] = SETTING_STEP("wheel.ffb_drift", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_FFB_DRIFT, 0, 100, 15, 5),
-    [XS_WHEEL_RUMBLE] = SETTING_STEP("wheel.rumble", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_RUMBLE, 0, 100, 0, 5),
-    [XS_WHEEL_ENGINE] = SETTING_STEP("wheel.engine", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_ENGINE, 0, 100, 0, 5),
-    [XS_WHEEL_KICK] = SETTING_STEP("wheel.hit_weight", XS_FLOAT, XS_RESTART, RENV_INPUT_WHEEL_KICK, 0, 100, 0, 5),
-    [XS_WHEEL_KICK_FLIP] = SETTING("wheel.hit_flip", XS_BOOL, XS_RESTART, RENV_INPUT_WHEEL_KICK_FLIP, NULL, NULL, 0, 0, 0),
+#include "xbox_settings_wheel_set.inc"   /* the racing wheel settings (the Wheel page) */
 #if defined(__ANDROID__)
     [XS_INPUT_VIBRATION]    = SETTING("input.vibration", XS_CHOICE, XS_RESTART, RENV_ANDROID_VIBRATION, k_vibration, NULL, 0, 0, 0),
     /* The on-screen controls (touch_pad.h, BO-189). Live. */
@@ -280,6 +260,7 @@ static struct {
     /* BO-230: the soundtrack last chosen in the title's screen; "" is EA
      * GAMES TRAX chosen, no key is nothing chosen yet. */
     { "audio.custom_music_soundtrack", RENV_AUDIO_CUSTOM_SOUNDTRACK, "", 0, 0, 1 },
+#include "xbox_settings_wheel_text.inc"   /* the racing wheel's bindings */
 };
 #define TEXT_COUNT ((int)(sizeof s_text / sizeof s_text[0]))
 

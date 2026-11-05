@@ -24,6 +24,7 @@
 #include "rumble_curve.h"
 #include "touch_pad.h"
 #include "wheel_pad.h"
+#include "wheel_probe.h"
 #include "recomp_env.h"
 
 #include <errno.h>
@@ -581,6 +582,11 @@ xbox_wheel_car_fn xbox_InputWheelCarSource(void) { return g_wheel_car; }
 static xbox_wheel_grip_fn g_wheel_grip;
 void xbox_InputWheelSetGripSource(xbox_wheel_grip_fn fn) { g_wheel_grip = fn; }
 xbox_wheel_grip_fn xbox_InputWheelGripSource(void) { return g_wheel_grip; }
+
+/* The overlay's Wheel pages ask the SDL glue for the joysticks and for "press now" capture through this table (wheel_probe.h). */
+static const xbox_wheel_probe_api *g_wheel_probe;
+void xbox_InputWheelSetProbe(const xbox_wheel_probe_api *api) { g_wheel_probe = api; }
+const xbox_wheel_probe_api *xbox_InputWheelProbeApi(void) { return g_wheel_probe; }
 
 void xbox_InputWheelSetReader(xbox_wheel_read_fn fn)
 {

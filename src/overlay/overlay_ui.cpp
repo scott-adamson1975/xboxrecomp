@@ -124,9 +124,9 @@ static int s_steps[D_COUNT];
 static int s_activate, s_back, s_page_delta, s_reset;
 
 /* The page and the row on each. */
-enum { P_DISPLAY, P_GRAPHICS, P_AUDIO, P_INPUT, P_WHEEL, P_POWER, P_ADVANCED, P_COUNT };
+enum { P_DISPLAY, P_GRAPHICS, P_AUDIO, P_INPUT, P_WHEEL, P_WHEELTEST, P_POWER, P_ADVANCED, P_COUNT };
 static const char *const k_page_name[P_COUNT] = {
-    "Display", "Graphics", "Audio", "Input", "Wheel", "Power", "Advanced"
+    "Display", "Graphics", "Audio", "Input", "Wheel", "Wheel test", "Power", "Advanced"
 };
 static int s_page;
 static int s_sel[P_COUNT];
@@ -292,27 +292,7 @@ static constexpr Meta k_meta[XS_COUNT] = {
     /* XS_GRAPHICS_TEXUP_PRELOAD */ { XS_GRAPHICS_TEXUP_PRELOAD, "Upscale while loading", "Does most of the sharpening during the loading screen and the countdown, so the first race on a new track has less of it to do; a fast PC can leave it off.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GRAPHICS_SOFTBODY */  { XS_GRAPHICS_SOFTBODY, "Soft-body damage", "Cars crumple, tear and bend where they are hit, with the game's own sparks and debris where metal rips, instead of only losing panels. Drawn only: handling and the race are unchanged. Costs CPU in big pile-ups. Applies after a restart.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GAME_LANGUAGE */      { XS_GAME_LANGUAGE, "Language", "The language of the game's text, speech and films, as an Xbox set to that language would show them. Only the languages on your disc are offered. Applies after a restart.", 1, FMT_PLAIN, n_language, 0 },
-    /* XS_WHEEL_RANGE */ { XS_WHEEL_RANGE, "Wheel rotation", "How far the base turns from one end to the other, in degrees (900 for a Thrustmaster T818). The stops and the spring follow it.", 5, FMT_DEG, NULL, 0 },
-    /* XS_WHEEL_LOCK */ { XS_WHEEL_LOCK, "Game lock", "The turn that gives full steering, lock to lock, in degrees. Smaller is quicker: 360 reaches full lock at 180 degrees each way. With the wheel rotation at 900 and this at 540, full lock is at 270 degrees each way.", 10, FMT_DEG, NULL, 0 },
-    /* XS_WHEEL_STEER_SENS */ { XS_WHEEL_STEER_SENS, "Steering sensitivity", "How much the car steers for a given turn, on top of the game lock. 100% is as the lock gives it; 200% reaches full steering at half the turn.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_STEER_LIN */ { XS_WHEEL_STEER_LIN, "Steering linearity", "0 steers in a straight line with the wheel. Above 0 the car steers less around the middle and more near the ends (calmer on a straight); below 0 it steers more around the middle (sharper).", 5, FMT_SIGNED, NULL, 0 },
-    /* XS_WHEEL_STEER_DEAD */ { XS_WHEEL_STEER_DEAD, "Steering deadzone", "How far the wheel can turn from the middle before the car steers, in percent of the travel. Stops a wheel that rests a little off centre from creeping.", 0.5, FMT_RAWPCT1, NULL, 0 },
-    /* XS_WHEEL_STEER_SKIP */ { XS_WHEEL_STEER_SKIP, "Game deadzone skip", "The game ignores a band around the middle of a stick, so the first degrees of a wheel would do nothing. This jumps over that band, in percent. 11 suits this game; 0 leaves it.", 1, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_PEDAL_DEAD */ { XS_WHEEL_PEDAL_DEAD, "Pedal deadzone", "How far a pedal can be pressed and still count as released, in percent of its travel.", 1, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_THROTTLE_SENS */ { XS_WHEEL_THROTTLE_SENS, "Throttle sensitivity", "How far the pedal has to go for full throttle. 100% is the whole travel; 200% is full at half of it.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_THROTTLE_LIN */ { XS_WHEEL_THROTTLE_LIN, "Throttle linearity", "0 is a straight line. Above 0 the throttle comes in gently at first; below 0 it comes in sharply at first.", 5, FMT_SIGNED, NULL, 0 },
-    /* XS_WHEEL_BRAKE_SENS */ { XS_WHEEL_BRAKE_SENS, "Brake sensitivity", "How far the pedal has to go for full braking. 100% is the whole travel; 200% is full at half of it.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_BRAKE_LIN */ { XS_WHEEL_BRAKE_LIN, "Brake linearity", "0 is a straight line. Above 0 the brake bites gently at first; below 0 it bites hard at first.", 5, FMT_SIGNED, NULL, 0 },
-    /* XS_WHEEL_FFB_SPRING */ { XS_WHEEL_FFB_SPRING, "Centring spring", "Force feedback: the wheel pulls back to the middle, this percent of the base's force at the end of the game lock. 0 is off, and with it everything below. A 10 Nm base is strong: start low, hands on the wheel.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_FFB_SPEED */ { XS_WHEEL_FFB_SPEED, "Spring follows speed", "The speed, in metres per second, at which the spring has its whole strength; slower it is weaker, down to the rest level at a standstill. 0 keeps it the same at every speed. 40 is about 90 mph.", 5, FMT_MPS, NULL, 0 },
-    /* XS_WHEEL_FFB_REST */ { XS_WHEEL_FFB_REST, "Spring at a standstill", "With the spring following the speed: the percent of its strength left when the car is stopped.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_FFB_RACE_ONLY */ { XS_WHEEL_FFB_RACE_ONLY, "Spring only in a race", "The spring fades out in menus, pauses and the results, and back in when a race runs.", 1, FMT_PLAIN, NULL, 0 },
-    /* XS_WHEEL_FFB_AIR */ { XS_WHEEL_FFB_AIR, "Spring in the air", "The percent of the spring left while the car is in the air. 0 lets the wheel go free on a jump.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_FFB_DRIFT */ { XS_WHEEL_FFB_DRIFT, "Spring in a drift", "The percent of the spring left in a full drift, so the wheel goes light as the front end slips. 100 leaves the spring as it is.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_RUMBLE */ { XS_WHEEL_RUMBLE, "Rumble and jolts", "The game's own rumble, and the shake of a hit or a landing, as a vibration on the wheel: this percent of the base's force at the strongest. Needs the spring above 0.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_ENGINE */ { XS_WHEEL_ENGINE, "Engine vibration", "A light vibration while racing, a little at a standstill and more with speed. Needs the spring above 0.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_KICK */ { XS_WHEEL_KICK, "Hit weight", "When the car is hit, a weight on the wheel toward the side it is hit from: this percent of the base's force at the hardest hit. Needs the spring above 0.", 5, FMT_RAWPCT, NULL, 0 },
-    /* XS_WHEEL_KICK_FLIP */ { XS_WHEEL_KICK_FLIP, "Hit weight: other way", "Turn on if the weight of a hit comes out on the wrong side.", 1, FMT_PLAIN, NULL, 0 },
+#include "overlay_wheel_meta.inc"   /* the racing wheel settings: labels and hints */
 #if defined(__ANDROID__)
     /* XS_INPUT_VIBRATION */    { XS_INPUT_VIBRATION, "Vibration", "Where rumble goes. Auto uses this device's vibrator while its built-in controls are in use. External controllers don't rumble on Android; This device vibrates anyway.", 1, FMT_PLAIN, n_vibration, 0 },
     /* XS_INPUT_TOUCH */        { XS_INPUT_TOUCH, "Touch controls", "On-screen controls. In a race: steer with the left thumb anywhere on the left half, GAS, BRAKE and BOOST on the right (BOOST keeps accelerating). In menus: a d-pad and A B X Y. Pause and this menu are at the top, left of centre. Auto hides them while a controller is used and shows them again when you touch the screen.", 1, FMT_PLAIN, n_touch, 0 },
@@ -339,7 +319,8 @@ static_assert(meta_in_order(), "k_meta: one entry per xs_id, in xbox_settings.h 
 #if defined(__ANDROID__)
 extern "C" const char *nvk_core_describe(void);   /* nv2a_vk_core.c */
 #endif
-enum RowKind { R_SETTING, R_ACTION, R_INFO, R_SPEAKERS, R_FOLDER };
+enum RowKind { R_SETTING, R_ACTION, R_INFO, R_SPEAKERS, R_FOLDER,
+               R_BIND, R_LIVE };              /* the Wheel pages' (overlay_wheel.inc): a binding to press now, a live value */
 enum Action { A_NONE,                                               /* 0 is "no question asked" (s_confirm) */
               A_RESET_PAGE, A_RESET_ALL, A_REPORT, A_REPORT_SHOT,
               A_HOST0, A_HOST1, A_HOST2, A_HOST3,                  /* xbox_OverlaySetHostRows */
@@ -1047,6 +1028,8 @@ struct Row {
     const char *text;                 /* R_ACTION label, R_INFO line */
 };
 
+#include "overlay_wheel.h"           /* the Wheel and Wheel test pages (overlay_wheel.inc) */
+
 /* The Advanced page's three lines on what reaches the glass (below, with
  * the frame-time graph). */
 static char s_glass_info[3][160];
@@ -1250,22 +1233,8 @@ static int page_rows(int page, Row *r)
         ACT(A_RESET_PAGE, "Reset this page to the defaults");
         break;
     case P_WHEEL:
-        if (recomp_env(RENV_INPUT_WHEEL_STEER) && *recomp_env(RENV_INPUT_WHEEL_STEER))
-            INFO("A wheel is set up. Changes here apply after a restart.");
-        else
-            INFO("No wheel is set up yet (RECOMP_WHEEL_STEER and the pedals' variables). The rows below apply once one is.");
-        SET(XS_WHEEL_RANGE); SET(XS_WHEEL_LOCK);
-        SET(XS_WHEEL_STEER_SENS); SET(XS_WHEEL_STEER_LIN); SET(XS_WHEEL_STEER_DEAD); SET(XS_WHEEL_STEER_SKIP);
-        SET(XS_WHEEL_PEDAL_DEAD);
-        SET(XS_WHEEL_THROTTLE_SENS); SET(XS_WHEEL_THROTTLE_LIN);
-        SET(XS_WHEEL_BRAKE_SENS); SET(XS_WHEEL_BRAKE_LIN);
-        SET(XS_WHEEL_FFB_SPRING);
-        if (xbox_SettingValue(XS_WHEEL_FFB_SPRING) > 0) {
-            SET(XS_WHEEL_FFB_SPEED); SET(XS_WHEEL_FFB_REST); SET(XS_WHEEL_FFB_RACE_ONLY);
-            SET(XS_WHEEL_FFB_AIR); SET(XS_WHEEL_FFB_DRIFT);
-            SET(XS_WHEEL_RUMBLE); SET(XS_WHEEL_ENGINE); SET(XS_WHEEL_KICK); SET(XS_WHEEL_KICK_FLIP);
-        }
-        ACT(A_RESET_PAGE, "Reset this page to the defaults");
+    case P_WHEELTEST:
+        n = wheel_rows(page, r);                  /* overlay_wheel.inc */
         break;
     case P_POWER:
 #if !defined(__linux__)
@@ -1451,7 +1420,7 @@ static void value_text(xs_id id, char *out, size_t n);
 
 static void test_state(const char *path)
 {
-    static const char *const kinds[] = { "setting", "action", "info", "speakers", "folder" };
+    static const char *const kinds[] = { "setting", "action", "info", "speakers", "folder", "bind", "live" };
     static const char *const bkinds[] = { "use", "off", "up", "place", "dir" };
     Row r[OVERLAY_ROWS];
     int n = page_rows(s_page, r);
@@ -1797,6 +1766,12 @@ static void activate_row(const Row &r)
 {
     if (s_confirm && !(r.kind == R_ACTION && r.action == s_confirm))
         s_confirm = 0;
+    if (r.kind == R_BIND) {
+        wheel_bind_activate(r.action);        /* overlay_wheel.inc */
+        return;
+    }
+    if (r.kind == R_LIVE)
+        return;
     if (r.kind == R_ACTION && (r.action == A_RESTART_PIN || r.action == A_QUIT)) {
         if (s_confirm != r.action) {
             s_confirm = r.action;
@@ -1980,6 +1955,7 @@ static void set_open(bool on, bool from_title = false)
         pause_sync();
         fprintf(stderr, LOGP "open: the title is paused, its input is held\n");
     } else {
+        wheel_close();                    /* the Wheel pages' joystick handles (overlay_wheel.inc) */
         /* A build beside a running title would cost it frames: it stops
          * with the overlay, and goes on from there the next time. */
         if (s_sb && sb_state(NULL, NULL, 0) == XBOX_SHADERS_RUNNING) {
@@ -2426,6 +2402,8 @@ void xbox_OverlayPoll(void)
         if (s_open && s_confirm) {
             s_confirm = 0;                /* B takes back a Restart / Quit question */
             menusnd_play(XBOX_OVERLAY_SND_BACK);
+        } else if (s_open && wheel_cancel_capture()) {
+            menusnd_play(XBOX_OVERLAY_SND_BACK);   /* a wheel binding that waited for a control */
         } else if (s_open && s_mx_open) {
             mx_back();
             menusnd_play(XBOX_OVERLAY_SND_BACK);
@@ -3696,6 +3674,8 @@ static void gesture_scroll()
     ImGui::SetScrollY(ImGui::GetScrollY() - ImGui::GetIO().MouseDelta.y);
 }
 
+#include "overlay_wheel.inc"              /* the Wheel and Wheel test pages */
+
 /* One row. `fs` is the label's size, `rh` the pitch; the columns are the
  * layout's. */
 static void draw_row(const Row &r, int idx, bool sel, float width, float rh, float fs, ImDrawList *dl,
@@ -3781,6 +3761,7 @@ static void draw_row(const Row &r, int idx, bool sel, float width, float rh, flo
             arrow_tri(dl, lx - fs * 0.9f, cy, ar, 1, col(T->arrow));
         }
     }
+#include "overlay_wheel_row.inc"          /* the Wheel pages' rows: R_BIND and R_LIVE */
     if (r.kind == R_ACTION) {
         const bool pin = r.action == A_RESTART_PIN;
         if (r.action >= A_CHEAT0 && r.action <= A_CHEAT3 && strrchr(r.text, ':')) {
@@ -4346,6 +4327,8 @@ static bool row_hint(const Row &r, char *hint, size_t n)
 {
     bool locked_out = false;
     hint[0] = 0;
+    if (r.kind == R_BIND || r.kind == R_LIVE)
+        return wheel_hint(r, hint, n);        /* overlay_wheel.inc */
     if (r.kind == R_SETTING) {
         const xs_setting *s = xbox_SettingGet(r.id);
         locked_out = s->locked;
@@ -4576,6 +4559,8 @@ static void build_pages_inner()
 
     /* Steps from the pad and keys. */
     collect_steps();
+    wheel_frame();                        /* the Wheel pages: the joysticks, a binding waiting for a control */
+    wheel_swallow_input();
     auto move = [&](int dir) {
         for (int k = 0; k < n; k++) {
             sel = (sel + dir + n) % n;
@@ -4609,6 +4594,8 @@ static void build_pages_inner()
         if (rows[sel].kind == R_SETTING) {
             xbox_SettingReset(rows[sel].id);
             changed();
+        } else if (rows[sel].kind == R_BIND) {
+            wheel_bind_clear(rows[sel].action);
         }
     s_reset = 0;
     /* The footer: the selected row's hint (wrapped), a restart note, the keys. */
@@ -4722,7 +4709,7 @@ static void build_pages_inner()
                 sel = i;                  /* a tap beside a slider's bar, or a locked row */
                 menusnd_play(XBOX_OVERLAY_SND_MOVE);
             }
-        } else if (clicked && (rows[i].kind == R_ACTION || rows[i].kind == R_FOLDER)) {
+        } else if (clicked && (rows[i].kind == R_ACTION || rows[i].kind == R_FOLDER || rows[i].kind == R_BIND)) {
             sel = i;
             activate(rows[i]);
         } else if (clicked && rows[i].kind == R_SPEAKERS) {
