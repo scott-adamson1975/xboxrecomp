@@ -113,6 +113,7 @@ typedef enum {
     XS_GRAPHICS_SOFTBODY,    /* a title's soft-body vehicle damage (drawn only), off as shipped; read at start */
     XS_GAME_LANGUAGE,        /* the dashboard language the kernel reports (XC_LANGUAGE); a row only where the title has more than one */
 #include "xbox_settings_wheel_ids.inc"   /* XS_WHEEL_*: the racing wheel settings */
+#include "xbox_settings_simhub_ids.inc"   /* XS_SIMHUB_*: the SimHub telemetry settings */
 #if defined(__ANDROID__)
     XS_INPUT_VIBRATION,      /* pad motors or the device's vibrator (android_vibration.c) */
     XS_INPUT_TOUCH,          /* the on-screen controls: auto / always / off (touch_pad.h) */
