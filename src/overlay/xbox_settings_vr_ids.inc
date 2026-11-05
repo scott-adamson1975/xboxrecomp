@@ -6,3 +6,5 @@
     XS_VR_HIDE_DRIVER,
     XS_VR_BOOSTFX,
     XS_VR_KEEP_FX,
+    XS_VR_ASPECT_X,
+    XS_VR_ASPECT_Y,

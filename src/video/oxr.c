@@ -27,6 +27,7 @@
 #define VK_USE_PLATFORM_WIN32_KHR 1
 #endif
 #include "oxr.h"
+#include "recomp_env.h"
 
 #if defined(XBOXRECOMP_HAVE_OPENXR) && defined(XBOXRECOMP_HAVE_VULKAN)
 
@@ -1217,10 +1218,18 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, VkImageLayout slot_l
                 pv[e].pose.position.x = pose.p[0] + side * rx;
                 pv[e].pose.position.y = pose.p[1] + side * ry;
                 pv[e].pose.position.z = pose.p[2] + side * rz;
-                pv[e].fov.angleLeft = -atanf(vwx);
-                pv[e].fov.angleRight = atanf(vwx);
-                pv[e].fov.angleUp = atanf(vwy);
-                pv[e].fov.angleDown = -atanf(vwy);
+                /* The VR page's picture size adjust (RECOMP_VR_ASPECT_X / _Y, percent, 0 = as drawn): the layer claims a wider or
+                 * narrower frustum than the picture was drawn with, so the picture is stretched or squeezed on that axis. Read
+                 * each frame, so the settings page changes it live. */
+                float ax = 1.0f + (float)recomp_env_double(RENV_VR_ASPECT_X, 0.0) / 100.0f;
+                float ay = 1.0f + (float)recomp_env_double(RENV_VR_ASPECT_Y, 0.0) / 100.0f;
+
+                if (!(ax > 0.3f && ax < 3.0f)) ax = 1.0f;
+                if (!(ay > 0.3f && ay < 3.0f)) ay = 1.0f;
+                pv[e].fov.angleLeft = -atanf(vwx * ax);
+                pv[e].fov.angleRight = atanf(vwx * ax);
+                pv[e].fov.angleUp = atanf(vwy * ay);
+                pv[e].fov.angleDown = -atanf(vwy * ay);
                 pv[e].subImage.swapchain = X.sc;
                 pv[e].subImage.imageRect.offset.x = (int32_t)(((X.swap ? 1 - e : e)) * (w / 2u));   /* RECOMP_VR_SWAP=1 */
 #if defined(OXR_HAVE_D3D11)

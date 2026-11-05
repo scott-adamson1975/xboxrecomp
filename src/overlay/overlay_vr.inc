@@ -12,6 +12,9 @@ static int vr_rows(int page, Row *r)
     VSET(XS_VR_IPD);
     VSET(XS_VR_NEAR);
     VSET(XS_VR_FOV);
+    VINFO("Picture size, on top of the display aspect and ultrawide settings; 0 and 0 is as the game draws it. These show at once.");
+    VSET(XS_VR_ASPECT_X);
+    VSET(XS_VR_ASPECT_Y);
     VSET(XS_VR_MENU_ASPECT);
     VSET(XS_VR_HIDE_DRIVER);
     VSET(XS_VR_BOOSTFX);

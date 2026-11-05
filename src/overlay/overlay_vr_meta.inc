@@ -6,3 +6,5 @@
     /* XS_VR_HIDE_DRIVER */ { XS_VR_HIDE_DRIVER, "Hide the driver", "Hides the driver's figure, which can sit in front of the eyes in the seat view.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_VR_BOOSTFX */ { XS_VR_BOOSTFX, "Boost effect", "The speed streaks and blur while boosting. Off if they are uncomfortable in the headset.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_VR_KEEP_FX */ { XS_VR_KEEP_FX, "Bloom and motion blur", "On keeps the game's bloom and motion blur in the headset picture (it may come out brighter). Off, the default, turns them off for it.", 1, FMT_PLAIN, NULL, 0 },
+    /* XS_VR_ASPECT_X */ { XS_VR_ASPECT_X, "Picture width", "Stretches (+) or squeezes (-) the headset picture sideways, in percent, on top of the display aspect and ultrawide settings. 0 is as the game draws it. Changes show at once: adjust until a round thing (a wheel, a roundel) looks round.", 1, FMT_RAWPCT, NULL, 0 },
+    /* XS_VR_ASPECT_Y */ { XS_VR_ASPECT_Y, "Picture height", "Stretches (+) or squeezes (-) the headset picture up and down, in percent. 0 is as the game draws it. Changes show at once.", 1, FMT_RAWPCT, NULL, 0 },
