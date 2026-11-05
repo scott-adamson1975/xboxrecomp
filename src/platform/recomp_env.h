@@ -121,6 +121,8 @@ extern "C" {
     X(VR_KEEP_FX, CONFIG, "RECOMP_VR_KEEP_FX", NULL, "1: VR keeps the game's bloom and motion blur (it may come out brighter)") \
     X(VR_ASPECT_X, CONFIG, "RECOMP_VR_ASPECT_X", NULL, "VR: stretch (+) or squeeze (-) the headset picture sideways, percent (default 0): the aspect adjust that goes with the display aspect") \
     X(VR_ASPECT_Y, CONFIG, "RECOMP_VR_ASPECT_Y", NULL, "VR: stretch (+) or squeeze (-) the headset picture up and down, percent (default 0)") \
+    X(VR_SCREEN_X, CONFIG, "RECOMP_VR_SCREEN_X", NULL, "VR: stretch (+) or squeeze (-) the flat screen the menus, crash views and replays show on, sideways, percent (default 0)") \
+    X(VR_SCREEN_Y, CONFIG, "RECOMP_VR_SCREEN_Y", NULL, "VR: stretch (+) or squeeze (-) the flat screen up and down, percent (default 0)") \
     X(INPUT_WHEEL_ENABLE, CONFIG, "RECOMP_WHEEL_ENABLE",     NULL, "0: the racing wheel is not used even if it is set up (default on once a steering axis is bound)") \
     X(INPUT_WHEEL_STEER, CONFIG, "RECOMP_WHEEL_STEER",       NULL, "racing wheel, steering axis: VID:PID:AXIS of a joystick (hex ids, SDL axis index; e.g. 044F:B696:0). Setting any of the three RECOMP_WHEEL_ axes turns the wheel on (the SDL host)") \
     X(INPUT_WHEEL_THROTTLE, CONFIG, "RECOMP_WHEEL_THROTTLE", NULL, "racing wheel, throttle pedal axis, VID:PID:AXIS (a trailing ! for a pedal that reads high at rest); may be another device than the steering") \

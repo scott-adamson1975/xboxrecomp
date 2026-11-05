@@ -1183,17 +1183,18 @@ void xbox_VrPresent(const struct nvk_core *C, VkImage slot, VkImageLayout slot_l
                 lq.pose.position.z = s_menu_pose[6];
                 /* between 4:3 (a little tall) and 16:9 (squashed): 3:2 */
                 {
-                    static float aspect;
+                    /* RECOMP_VR_MENU_ASPECT: width / height, default 1.42; RECOMP_VR_SCREEN_X / _Y: the screen's width and
+                     * height each stretched or squeezed by that percent (0 = none). Read each frame: the VR page changes them live. */
+                    float aspect = (float)recomp_env_double(RENV_VR_MENU_ASPECT, 1.42);
+                    float sx = 1.0f + (float)recomp_env_double(RENV_VR_SCREEN_X, 0.0) / 100.0f;
+                    float sy = 1.0f + (float)recomp_env_double(RENV_VR_SCREEN_Y, 0.0) / 100.0f;
 
-                    if (aspect <= 0.0f) {                      /* RECOMP_VR_MENU_ASPECT: width / height, default 1.42 */
-                        const char *e = getenv("RECOMP_VR_MENU_ASPECT");
-
-                        aspect = e ? (float)atof(e) : 1.42f;
-                        if (!(aspect > 1.0f && aspect < 2.5f))
-                            aspect = 1.42f;
-                    }
-                    lq.size.width = 2.9f;
-                    lq.size.height = 2.9f / aspect;
+                    if (!(aspect > 1.0f && aspect < 2.5f))
+                        aspect = 1.42f;
+                    if (!(sx > 0.3f && sx < 3.0f)) sx = 1.0f;
+                    if (!(sy > 0.3f && sy < 3.0f)) sy = 1.0f;
+                    lq.size.width = 2.9f * sx;
+                    lq.size.height = 2.9f / aspect * sy;
                 }
                 layers[0] = (const XrCompositionLayerBaseHeader *)&lq;
                 have_layer = 1;

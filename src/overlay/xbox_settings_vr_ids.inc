@@ -8,3 +8,5 @@
     XS_VR_KEEP_FX,
     XS_VR_ASPECT_X,
     XS_VR_ASPECT_Y,
+    XS_VR_SCREEN_X,
+    XS_VR_SCREEN_Y,

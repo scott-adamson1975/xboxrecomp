@@ -12,10 +12,13 @@ static int vr_rows(int page, Row *r)
     VSET(XS_VR_IPD);
     VSET(XS_VR_NEAR);
     VSET(XS_VR_FOV);
-    VINFO("Picture size, on top of the display aspect and ultrawide settings; 0 and 0 is as the game draws it. These show at once.");
+    VINFO("The car view: picture size, on top of the display aspect and ultrawide settings; 0 and 0 is as the game draws it. These show at once.");
     VSET(XS_VR_ASPECT_X);
     VSET(XS_VR_ASPECT_Y);
+    VINFO("The flat screen, the cinema view of the menus, crash views and replays: its shape, then a width and height adjust (0 and 0: as set).");
     VSET(XS_VR_MENU_ASPECT);
+    VSET(XS_VR_SCREEN_X);
+    VSET(XS_VR_SCREEN_Y);
     VSET(XS_VR_HIDE_DRIVER);
     VSET(XS_VR_BOOSTFX);
     VSET(XS_VR_KEEP_FX);
