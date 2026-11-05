@@ -1,0 +1,8 @@
+/* The VR settings' rows, included inside the s_set[] initialiser of xbox_settings.c (see xbox_settings_vr_ids.inc). */
+    [XS_VR_IPD] = SETTING_STEP("vr.ipd", XS_FLOAT, XS_RESTART, RENV_VR_IPD, 50, 80, 64, 1),
+    [XS_VR_NEAR] = SETTING_STEP("vr.near_plane", XS_FLOAT, XS_RESTART, RENV_VR_NEAR, 50, 400, 100, 10),
+    [XS_VR_FOV] = SETTING("vr.headset_fov", XS_BOOL, XS_RESTART, RENV_VR_FOV, NULL, NULL, 0, 1, 1),
+    [XS_VR_MENU_ASPECT] = SETTING_STEP("vr.menu_aspect", XS_FLOAT, XS_RESTART, RENV_VR_MENU_ASPECT, 1.1, 2.4, 1.42, 0.05),
+    [XS_VR_HIDE_DRIVER] = SETTING("vr.hide_driver", XS_BOOL, XS_RESTART, RENV_VR_HIDE_DRIVER, NULL, NULL, 0, 0, 0),
+    [XS_VR_BOOSTFX] = SETTING("vr.boost_effect", XS_BOOL, XS_RESTART, RENV_VR_BOOSTFX, NULL, NULL, 0, 1, 1),
+    [XS_VR_KEEP_FX] = SETTING("vr.keep_bloom_blur", XS_BOOL, XS_RESTART, RENV_VR_KEEP_FX, NULL, NULL, 0, 0, 0),

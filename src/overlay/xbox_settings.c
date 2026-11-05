@@ -217,6 +217,7 @@ static xs_setting s_set[XS_COUNT] = {
     [XS_GAME_LANGUAGE]      = SETTING("game.language", XS_CHOICE, XS_RESTART, RENV_GAME_LANGUAGE, k_language, NULL, 0, 0, 0),
 #include "xbox_settings_wheel_set.inc"   /* the racing wheel settings (the Wheel page) */
 #include "xbox_settings_simhub_set.inc"   /* the SimHub telemetry settings (the SimHub page) */
+#include "xbox_settings_vr_set.inc"       /* the VR settings (the VR page) */
 #if defined(__ANDROID__)
     [XS_INPUT_VIBRATION]    = SETTING("input.vibration", XS_CHOICE, XS_RESTART, RENV_ANDROID_VIBRATION, k_vibration, NULL, 0, 0, 0),
     /* The on-screen controls (touch_pad.h, BO-189). Live. */

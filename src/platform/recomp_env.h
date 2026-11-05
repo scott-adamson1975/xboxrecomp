@@ -112,6 +112,13 @@ extern "C" {
     X(INPUT_FIRST_PAD,   CONFIG, "RECOMP_INPUT_FIRST_PAD",   NULL, "the first controller's player: player1 (default; the keyboard adds to it) or player2 (the keyboard is player 1 alone, controllers from player 2: keyboard split screen)") \
     X(INPUT_FACE_LAYOUT, CONFIG, "RECOMP_INPUT_FACE_LAYOUT", NULL, "the host pad's face buttons: xbox (default), nintendo (A and B, X and Y change places: a pad printed the Nintendo way)") \
     X(INPUT_GLYPHS,      CONFIG, "RECOMP_INPUT_GLYPHS",      NULL, "the button prompts the title draws: auto (default: those of the pad last used; a diamond-of-dots positional set for a pad nothing is known about, the title's own with no pad), xbox (the title's own, nothing replaced), xbox_modern (LB RB LT RT), playstation, playstation5 (DualSense: uncoloured symbols), nintendo, steam (the Steam Deck and Valve's controllers), positional (any pad: a diamond of four dots, the one to press filled), keyboard (key caps; auto picks it while the keyboard was the last device used)") \
+    X(VR_IPD, CONFIG, "RECOMP_VR_IPD", NULL, "VR (the game's seat camera): the distance between the eyes' cameras, millimetres (default 64); the --stereo option wins") \
+    X(VR_NEAR, CONFIG, "RECOMP_VR_NEAR", NULL, "VR (the game's seat camera): the near plane, millimetres (default 100)") \
+    X(VR_FOV, CONFIG, "RECOMP_VR_FOV", NULL, "0: VR uses the game's own field of view, not the headset's") \
+    X(VR_MENU_ASPECT, CONFIG, "RECOMP_VR_MENU_ASPECT", NULL, "VR: the shape of the screen the menus show on in the headset, width over height (default 1.42)") \
+    X(VR_HIDE_DRIVER, CONFIG, "RECOMP_VR_HIDE_DRIVER", NULL, "1: VR hides the driver's figure") \
+    X(VR_BOOSTFX, CONFIG, "RECOMP_VR_BOOSTFX", NULL, "0: VR without the boost effect") \
+    X(VR_KEEP_FX, CONFIG, "RECOMP_VR_KEEP_FX", NULL, "1: VR keeps the game's bloom and motion blur (it may come out brighter)") \
     X(INPUT_WHEEL_ENABLE, CONFIG, "RECOMP_WHEEL_ENABLE",     NULL, "0: the racing wheel is not used even if it is set up (default on once a steering axis is bound)") \
     X(INPUT_WHEEL_STEER, CONFIG, "RECOMP_WHEEL_STEER",       NULL, "racing wheel, steering axis: VID:PID:AXIS of a joystick (hex ids, SDL axis index; e.g. 044F:B696:0). Setting any of the three RECOMP_WHEEL_ axes turns the wheel on (the SDL host)") \
     X(INPUT_WHEEL_THROTTLE, CONFIG, "RECOMP_WHEEL_THROTTLE", NULL, "racing wheel, throttle pedal axis, VID:PID:AXIS (a trailing ! for a pedal that reads high at rest); may be another device than the steering") \
