@@ -336,6 +336,16 @@ int xbox_VrInit(void)
     (void)api;
 #endif
     ext = X.d3d ? "XR_KHR_D3D11_enable" : "XR_KHR_vulkan_enable2";
+#if defined(_WIN32)
+    if (!X.d3d && !getenv("DISABLE_XR_APILAYER_NOVENDOR_motion_compensation")) {
+        /* The OpenXR-MotionCompensation layer (an implicit API layer, installed for motion rigs) crashes in xrCreateSwapchain
+         * for a Vulkan session (an access violation inside XR_APILAYER_NOVENDOR_motion_compensation.dll, seen on the development
+         * PC): off for this process on the Vulkan path (the Direct3D 11 one works with it). Its loader switch is its manifest's
+         * disable_environment. */
+        _putenv_s("DISABLE_XR_APILAYER_NOVENDOR_motion_compensation", "1");
+        fprintf(stderr, VRLOG "the Vulkan path: the OpenXR motion compensation layer is switched off for this run\n");
+    }
+#endif
     X.lib = open_loader();
     if (!X.lib) {
         fprintf(stderr, VRLOG "no OpenXR loader (openxr_loader.dll): VR off\n");
