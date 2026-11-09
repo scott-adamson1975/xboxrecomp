@@ -7564,7 +7564,14 @@ static void vk_on_draw(const struct nv2a_pb_draw *d)
                         " drawn once\n", rt_pass->offset, rt_pass->w, rt_pass->h, rt->offset, rt->w, rt->h);
             eyes = 1;
         }
+        if (eyes != 2) {
+            /* A draw with no eye shift: the push constant is set to 0 here, every time. A pass with another pipeline layout
+             * (a blur, a copy of a render target) leaves the push constants undefined once this layout is bound again, and
+             * the vertex stage adds them to every position: the picture went off the screen (a black lobby and race). */
+            static const float zero[2] = { 0.0f, 0.0f };
 
+            vkCmdPushConstants(s_cmd, s_playout, VK_SHADER_STAGE_VERTEX_BIT, 0, 8, zero);
+        }
 
         for (e = 0; e < eyes; e++) {
             if (eyes == 2) {
