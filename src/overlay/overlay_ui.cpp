@@ -397,6 +397,7 @@ static const char *const n_fit[]       = { "Letterbox", "Fill 16:10 (crops the s
 static const char *const n_aniso[]     = { "Off", "2x", "4x", "8x", "16x", NULL };
 static const char *const n_lod[]       = { "Off", "Auto (from the render scale)", "-0.5", "-1.0", "-1.5", NULL };
 static const char *const n_aa[]        = { "Off", "FXAA", "SMAA", NULL };
+static const char *const n_vrapi[]     = { "Direct3D 11", "Vulkan (experimental)", NULL };
 static const char *const n_speakers[]  = { "Auto", "Stereo", "5.1", NULL };
 static const char *const n_custom_level[] = { "Off", "Quieter", "Match game music", "Louder", NULL };
 static const char *const n_lfe_lowpass[] = { "Off", "80 Hz", "100 Hz", "120 Hz", NULL };

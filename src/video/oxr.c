@@ -4,7 +4,7 @@
  *
  * Two graphics back ends to the runtime, chosen at start-up:
  *
- *   Direct3D 11 (the default on Windows; RECOMP_VR_API=vulkan chooses the other). SteamVR's OpenXR runtime crashes in
+ *   Direct3D 11 (the default on Windows; the VR page or RECOMP_VR_API=vulkan chooses the other). SteamVR's OpenXR runtime crashes in
  *   xrCreateSwapchain for any Vulkan session on the development PC (an access violation inside the runtime, whatever the
  *   swapchain's shape, the way the Vulkan device was made, the Vulkan version, the layers: tools/win/xr-probe.c
  *   reproduces it on its own), while the same call through Direct3D 11 works. So the renderer stays Vulkan, and each
@@ -319,7 +319,7 @@ int xbox_VrInit(void)
     XrSystemGetInfo gi;
     XrSystemProperties sp;
     const char *ext;
-    const char *api = getenv("RECOMP_VR_API");
+    const char *api = getenv("RECOMP_VR_API") ? getenv("RECOMP_VR_API") : getenv("RECOMP_VR_API_SAVED");   /* the saved one: main.c reads it from the settings file */
     const char *wait_s = getenv("RECOMP_VR_WAIT");
     XrResult r;
     time_t deadline;

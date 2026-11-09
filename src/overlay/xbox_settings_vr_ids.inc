@@ -14,3 +14,4 @@
     XS_VR_AA,
     XS_VR_SHARPEN,
     XS_VR_LOD_BIAS,
+    XS_VR_API,

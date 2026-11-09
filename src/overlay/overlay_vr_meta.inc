@@ -14,3 +14,4 @@
     /* XS_VR_AA */ { XS_VR_AA, "Anti-aliasing", "Smooths jagged edges in the headset. SMAA is the cleanest. Used in VR instead of the Graphics page's.", 1, FMT_PLAIN, n_aa, 0 },
     /* XS_VR_SHARPEN */ { XS_VR_SHARPEN, "Sharpening", "Sharpening in the headset. 0 is best for a supersampled picture (sharpening makes it shimmer and look pixelated). Used in VR instead of the Graphics page's.", 0.05, FMT_PERCENT, NULL, 0 },
     /* XS_VR_LOD_BIAS */ { XS_VR_LOD_BIAS, "Texture sharpness (LOD bias)", "Picks sharper texture levels. Off is smoother in the headset. Used in VR instead of the Graphics page's.", 1, FMT_PLAIN, n_lod, 0 },
+    /* XS_VR_API */ { XS_VR_API, "Graphics API", "How the picture reaches the headset. Direct3D 11 is the one that works. Vulkan is experimental: SteamVR crashed with it on the development PC when the headset started. If VR does not start, start the game without --vr, set this back and restart.", 1, FMT_PLAIN, n_vrapi, 0 },

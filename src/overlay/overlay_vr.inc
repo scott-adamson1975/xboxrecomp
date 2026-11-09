@@ -9,6 +9,7 @@ static int vr_rows(int page, Row *r)
 
     (void)page;
     VINFO("The headset picture. VR starts with the --vr option (a launcher); these apply after a restart.");
+    VSET(XS_VR_API);
     VSET(XS_VR_IPD);
     VSET(XS_VR_NEAR);
     VSET(XS_VR_FOV);

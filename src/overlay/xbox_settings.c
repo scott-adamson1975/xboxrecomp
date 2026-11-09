@@ -60,6 +60,7 @@ static const char *const k_filmup[]   = { "off", "cheap", "best", NULL };
 static const char *const k_lod[]      = { "off", "auto", "-0.5", "-1", "-1.5", NULL };
 static const char *const k_lod_env[]  = { "0", "auto", "-0.5", "-1", "-1.5", NULL };
 static const char *const k_aa[]       = { "off", "fxaa", "smaa", NULL };
+static const char *const k_vrapi[]    = { "d3d11", "vulkan", NULL };
 static const char *const k_units[]    = { "mph", "kmh", NULL };
 static const char *const k_face[]     = { "xbox", "nintendo", NULL };
 static const char *const k_scheme[]   = { "xbox", "ps2", NULL };
@@ -1270,4 +1271,34 @@ void xbox_SettingsSetBackground(int bg)
         return;
     s_background = bg != 0;
     apply_audio();
+}
+
+int xbox_SettingsPeek(const char *title, const char *key, char *out, unsigned n)
+{
+    char path[512], err[128];
+    const char *over = getenv("RECOMP_SETTINGS"), *v;
+    recomp_cfg *c;
+
+    if (!out || !n)
+        return 0;
+    out[0] = 0;
+    if (over && !strcmp(over, "none"))
+        return 0;
+    if (over && *over) {
+        snprintf(path, sizeof path, "%s", over);
+    } else {
+        const char *dir = recomp_save_dir(title);
+
+        if (!dir || !*dir)
+            return 0;
+        snprintf(path, sizeof path, "%s/settings.toml", dir);
+    }
+    c = recomp_cfg_load_file_flags(path, RCFG_REOPEN_TABLES, err, sizeof err);
+    if (!c)
+        return 0;
+    v = recomp_cfg_string(c, key, NULL);
+    if (v && *v)
+        snprintf(out, n, "%s", v);
+    recomp_cfg_free(c);
+    return out[0] != 0;
 }

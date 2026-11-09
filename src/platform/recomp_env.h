@@ -130,6 +130,7 @@ extern "C" {
     X(VR_ASPECT_Y, CONFIG, "RECOMP_VR_ASPECT_Y", NULL, "VR: stretch (+) or squeeze (-) the headset picture up and down, percent (default 0)") \
     X(VR_SCREEN_X, CONFIG, "RECOMP_VR_SCREEN_X", NULL, "VR: stretch (+) or squeeze (-) the flat screen the menus, crash views and replays show on, sideways, percent (default 0)") \
     X(VR_SCREEN_Y, CONFIG, "RECOMP_VR_SCREEN_Y", NULL, "VR: stretch (+) or squeeze (-) the flat screen up and down, percent (default 0)") \
+    X(VR_API, CONFIG, "RECOMP_VR_API", NULL, "VR: the graphics API the headset path uses: d3d11 (default) or vulkan (experimental: SteamVR crashed in xrCreateSwapchain with it on the development PC)") \
     X(VR_SCALE, CONFIG, "RECOMP_VR_SCALE", NULL, "VR: the internal resolution (render scale 1..8) in the headset, instead of RECOMP_RENDER_SCALE (default 8)") \
     X(VR_AA, CONFIG, "RECOMP_VR_AA", NULL, "VR: anti-aliasing in the headset, off, fxaa or smaa, instead of RECOMP_GFX_AA (default smaa)") \
     X(VR_SHARPEN, CONFIG, "RECOMP_VR_SHARPEN", NULL, "VR: sharpening strength 0..1 in the headset, instead of RECOMP_GFX_SHARPEN (default 0)") \

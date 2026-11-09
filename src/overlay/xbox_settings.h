@@ -153,6 +153,9 @@ typedef struct xs_setting {
  * (recomp_save_dir). Before any recomp_env lookup that matters: it ends by
  * re-reading the cached environment. */
 void xbox_SettingsInit(const char *title);
+/* One text value from the settings file, read before xbox_SettingsInit (the headset path starts before it): key as in the file
+ * ("vr.api"). Returns 1 and the text, 0 when there is none. RECOMP_SETTINGS names the file as for xbox_SettingsInit. */
+int xbox_SettingsPeek(const char *title, const char *key, char *out, unsigned n);
 /* A default the host gives a variable (its env_default); the setting's
  * "reset" value. Call after xbox_SettingsInit. */
 void xbox_SettingsGameDefault(const char *env_name, const char *value);

@@ -14,3 +14,4 @@
     [XS_VR_AA] = SETTING("vr.aa", XS_CHOICE, XS_RESTART, RENV_VR_AA, k_aa, NULL, 0, 0, 2),
     [XS_VR_SHARPEN] = SETTING("vr.sharpen", XS_FLOAT, XS_RESTART, RENV_VR_SHARPEN, NULL, NULL, 0, 1, 0),
     [XS_VR_LOD_BIAS] = SETTING("vr.lod_bias", XS_CHOICE, XS_RESTART, RENV_VR_LOD_BIAS, k_lod, k_lod_env, 0, 0, 0),
+    [XS_VR_API] = SETTING("vr.api", XS_CHOICE, XS_RESTART, RENV_VR_API, k_vrapi, NULL, 0, 0, 0),
