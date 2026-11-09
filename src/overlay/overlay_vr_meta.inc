@@ -10,3 +10,7 @@
     /* XS_VR_ASPECT_Y */ { XS_VR_ASPECT_Y, "Picture height (car)", "Stretches (+) or squeezes (-) the headset picture up and down, in percent. 0 is as the game draws it. Changes show at once.", 1, FMT_RAWPCT, NULL, 0 },
     /* XS_VR_SCREEN_X */ { XS_VR_SCREEN_X, "Flat screen width", "Stretches (+) or squeezes (-) the flat screen (menus, crash views, replays) sideways, in percent, after its shape above. 0 is as set. Shows at once.", 1, FMT_RAWPCT, NULL, 0 },
     /* XS_VR_SCREEN_Y */ { XS_VR_SCREEN_Y, "Flat screen height", "Stretches (+) or squeezes (-) the flat screen up and down, in percent. 0 is as set. Shows at once.", 1, FMT_RAWPCT, NULL, 0 },
+    /* XS_VR_SCALE */ { XS_VR_SCALE, "Render scale", "The internal resolution in the headset, as a multiple of the Xbox's 640x480 (each eye gets half the frame's width). 8 is the sharpest and the heaviest. Used in VR instead of the Graphics page's.", 1, FMT_TIMES, NULL, 0 },
+    /* XS_VR_AA */ { XS_VR_AA, "Anti-aliasing", "Smooths jagged edges in the headset. SMAA is the cleanest. Used in VR instead of the Graphics page's.", 1, FMT_PLAIN, n_aa, 0 },
+    /* XS_VR_SHARPEN */ { XS_VR_SHARPEN, "Sharpening", "Sharpening in the headset. 0 is best for a supersampled picture (sharpening makes it shimmer and look pixelated). Used in VR instead of the Graphics page's.", 0.05, FMT_PERCENT, NULL, 0 },
+    /* XS_VR_LOD_BIAS */ { XS_VR_LOD_BIAS, "Texture sharpness (LOD bias)", "Picks sharper texture levels. Off is smoother in the headset. Used in VR instead of the Graphics page's.", 1, FMT_PLAIN, n_lod, 0 },

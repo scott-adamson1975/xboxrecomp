@@ -12,6 +12,11 @@ static int vr_rows(int page, Row *r)
     VSET(XS_VR_IPD);
     VSET(XS_VR_NEAR);
     VSET(XS_VR_FOV);
+    VINFO("The picture quality in the headset, used instead of the Graphics page's while in VR (restart to apply).");
+    VSET(XS_VR_SCALE);
+    VSET(XS_VR_AA);
+    VSET(XS_VR_SHARPEN);
+    VSET(XS_VR_LOD_BIAS);
     VINFO("The car view: picture size, on top of the display aspect and ultrawide settings; 0 and 0 is as the game draws it. These show at once.");
     VSET(XS_VR_ASPECT_X);
     VSET(XS_VR_ASPECT_Y);

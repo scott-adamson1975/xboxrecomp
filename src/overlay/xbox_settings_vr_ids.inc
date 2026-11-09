@@ -10,3 +10,7 @@
     XS_VR_ASPECT_Y,
     XS_VR_SCREEN_X,
     XS_VR_SCREEN_Y,
+    XS_VR_SCALE,            /* the headset picture's quality, used in place of the Graphics page's while in VR */
+    XS_VR_AA,
+    XS_VR_SHARPEN,
+    XS_VR_LOD_BIAS,

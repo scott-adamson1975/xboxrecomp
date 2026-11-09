@@ -10,3 +10,7 @@
     [XS_VR_SCREEN_Y] = SETTING_STEP("vr.screen_y", XS_FLOAT, 0, RENV_VR_SCREEN_Y, -50, 50, 0, 1),
     [XS_VR_ASPECT_Y] = SETTING_STEP("vr.aspect_y", XS_FLOAT, 0, RENV_VR_ASPECT_Y, -50, 50, 0, 1),
     [XS_VR_KEEP_FX] = SETTING("vr.keep_bloom_blur", XS_BOOL, XS_RESTART, RENV_VR_KEEP_FX, NULL, NULL, 0, 0, 0),
+    [XS_VR_SCALE] = SETTING("vr.render_scale", XS_INT, XS_RESTART, RENV_VR_SCALE, NULL, NULL, 1, 8, 8),
+    [XS_VR_AA] = SETTING("vr.aa", XS_CHOICE, XS_RESTART, RENV_VR_AA, k_aa, NULL, 0, 0, 2),
+    [XS_VR_SHARPEN] = SETTING("vr.sharpen", XS_FLOAT, XS_RESTART, RENV_VR_SHARPEN, NULL, NULL, 0, 1, 0),
+    [XS_VR_LOD_BIAS] = SETTING("vr.lod_bias", XS_CHOICE, XS_RESTART, RENV_VR_LOD_BIAS, k_lod, k_lod_env, 0, 0, 0),

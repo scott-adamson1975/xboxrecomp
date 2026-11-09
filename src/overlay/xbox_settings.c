@@ -1035,6 +1035,33 @@ void xbox_SettingsInit(const char *title)
     for (i = 0; i < TEXT_COUNT; i++)
         if (s_text[i].user && s_text[i].val[0] && !s_text[i].locked)
             sx_setenv_keep(recomp_env_name(s_text[i].env), s_text[i].val);
+    /* In VR (the headset path set RECOMP_VR_ACTIVE) the VR page's picture quality replaces the Graphics page's: render scale,
+     * anti-aliasing, sharpening, texture LOD bias. The Graphics rows are then taken as set from outside, so they keep what
+     * the file says and are not saved over. A Graphics value the environment already set (a launcher) stays. */
+    if (getenv("RECOMP_VR_ACTIVE")) {
+        static const int k_vrmap[][2] = {
+            { XS_VR_SCALE, XS_GRAPHICS_RENDER_SCALE }, { XS_VR_AA, XS_GRAPHICS_AA },
+            { XS_VR_SHARPEN, XS_GRAPHICS_SHARPEN }, { XS_VR_LOD_BIAS, XS_GRAPHICS_LOD_BIAS },
+        };
+        for (i = 0; i < (int)(sizeof k_vrmap / sizeof k_vrmap[0]); i++) {
+            xs_setting *v = &s_set[k_vrmap[i][0]], *g = &s_set[k_vrmap[i][1]];
+            char buf[32];
+            const char *e = v->locked ? getenv(recomp_env_name(v->env)) : NULL;
+
+            if (g->locked)
+                continue;
+            if (e && *e)
+                snprintf(buf, sizeof buf, "%s", e);
+            else
+                xbox_SettingEnvString(v, v->value, buf, sizeof buf);
+#if defined(_WIN32)
+            _putenv_s(recomp_env_name(g->env), buf);
+#else
+            setenv(recomp_env_name(g->env), buf, 1);
+#endif
+            g->locked = 1;
+        }
+    }
     /* recomp_save_dir read the table before these were set. */
     recomp_env_reload();
     XR_NOTICE( LOGP "%s\n", s_path);

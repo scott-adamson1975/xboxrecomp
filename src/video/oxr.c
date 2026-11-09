@@ -431,6 +431,12 @@ int xbox_VrInit(void)
         nvk_set_create_hooks(&s_hooks_vk);
     }
     X.ok = 1;
+    /* The settings (xbox_settings.c) read this: in VR the VR page's picture quality (scale, anti-aliasing...) replaces the Graphics page's. */
+#if defined(_WIN32)
+    _putenv_s("RECOMP_VR_ACTIVE", "1");
+#else
+    setenv("RECOMP_VR_ACTIVE", "1", 1);
+#endif
     fprintf(stderr, VRLOG "headset \"%s\": through %s%s\n", X.sysname, X.d3d ? "Direct3D 11 (shared with Vulkan)" : "Vulkan",
             X.d3d ? "" : ", the Vulkan device made by the OpenXR runtime");
     return 1;

@@ -130,6 +130,10 @@ extern "C" {
     X(VR_ASPECT_Y, CONFIG, "RECOMP_VR_ASPECT_Y", NULL, "VR: stretch (+) or squeeze (-) the headset picture up and down, percent (default 0)") \
     X(VR_SCREEN_X, CONFIG, "RECOMP_VR_SCREEN_X", NULL, "VR: stretch (+) or squeeze (-) the flat screen the menus, crash views and replays show on, sideways, percent (default 0)") \
     X(VR_SCREEN_Y, CONFIG, "RECOMP_VR_SCREEN_Y", NULL, "VR: stretch (+) or squeeze (-) the flat screen up and down, percent (default 0)") \
+    X(VR_SCALE, CONFIG, "RECOMP_VR_SCALE", NULL, "VR: the internal resolution (render scale 1..8) in the headset, instead of RECOMP_RENDER_SCALE (default 8)") \
+    X(VR_AA, CONFIG, "RECOMP_VR_AA", NULL, "VR: anti-aliasing in the headset, off, fxaa or smaa, instead of RECOMP_GFX_AA (default smaa)") \
+    X(VR_SHARPEN, CONFIG, "RECOMP_VR_SHARPEN", NULL, "VR: sharpening strength 0..1 in the headset, instead of RECOMP_GFX_SHARPEN (default 0)") \
+    X(VR_LOD_BIAS, CONFIG, "RECOMP_VR_LOD_BIAS", NULL, "VR: the texture LOD bias in the headset (0, auto, -0.5, -1, -1.5), instead of RECOMP_GFX_LOD_BIAS (default 0)") \
     X(INPUT_WHEEL_ENABLE, CONFIG, "RECOMP_WHEEL_ENABLE",     NULL, "0: the racing wheel is not used even if it is set up (default on once a steering axis is bound)") \
     X(INPUT_WHEEL_STEER, CONFIG, "RECOMP_WHEEL_STEER",       NULL, "racing wheel, steering axis: VID:PID:AXIS of a joystick (hex ids, SDL axis index; e.g. 044F:B696:0). Setting any of the three RECOMP_WHEEL_ axes turns the wheel on (the SDL host)") \
     X(INPUT_WHEEL_THROTTLE, CONFIG, "RECOMP_WHEEL_THROTTLE", NULL, "racing wheel, throttle pedal axis, VID:PID:AXIS (a trailing ! for a pedal that reads high at rest); may be another device than the steering") \
