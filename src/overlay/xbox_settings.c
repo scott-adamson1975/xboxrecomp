@@ -60,7 +60,7 @@ static const char *const k_filmup[]   = { "off", "cheap", "best", NULL };
 static const char *const k_lod[]      = { "off", "auto", "-0.5", "-1", "-1.5", NULL };
 static const char *const k_lod_env[]  = { "0", "auto", "-0.5", "-1", "-1.5", NULL };
 static const char *const k_aa[]       = { "off", "fxaa", "smaa", NULL };
-static const char *const k_vrapi[]    = { "d3d11", "vulkan", NULL };
+#include "xbox_settings_ours_names.inc"   /* the fork's choice lists */
 static const char *const k_units[]    = { "mph", "kmh", NULL };
 static const char *const k_face[]     = { "xbox", "nintendo", NULL };
 static const char *const k_scheme[]   = { "xbox", "ps2", NULL };
@@ -238,9 +238,7 @@ static xs_setting s_set[XS_COUNT] = {
     [XS_AUDIO_CUSTOM_AT_START] = SETTING("audio.custom_music_at_start", XS_BOOL, 0, RENV_AUDIO_CUSTOM_AT_START, NULL, NULL, 0, 0, 1),
     /* Read by the kernel when the title asks, early in boot: a restart. */
     [XS_GAME_LANGUAGE]      = SETTING("game.language", XS_CHOICE, XS_RESTART, RENV_GAME_LANGUAGE, k_language, NULL, 0, 0, 0),
-#include "xbox_settings_wheel_set.inc"   /* the racing wheel settings (the Wheel page) */
-#include "xbox_settings_simhub_set.inc"   /* the SimHub telemetry settings (the SimHub page) */
-#include "xbox_settings_vr_set.inc"       /* the VR settings (the VR page) */
+#include "xbox_settings_ours_set.inc"   /* the fork's rows: wheel, SimHub, VR */
 #if defined(__ANDROID__)
     [XS_INPUT_VIBRATION]    = SETTING("input.vibration", XS_CHOICE, XS_RESTART, RENV_ANDROID_VIBRATION, k_vibration, NULL, 0, 0, 0),
     /* The on-screen controls (touch_pad.h, BO-189). Live. */
@@ -295,8 +293,7 @@ static struct {
      * legacy without it is 0.2.x's (mostly the #42 workaround) and moves to
      * auto once where the display-link presenter is there. */
     { "display.present_timing_rev", RENV_PRESENT_TIMING_REV, "", 0, 0, 0 },
-#include "xbox_settings_wheel_text.inc"   /* the racing wheel's bindings */
-#include "xbox_settings_simhub_text.inc"   /* the SimHub telemetry address */
+#include "xbox_settings_ours_text.inc"   /* the fork's text settings: wheel bindings, SimHub address */
 };
 /* By its key, not a number: a text setting added above it moved the index
  * once (int030's input.keys) and the rev was written into the soundtrack. */
@@ -975,6 +972,8 @@ static int env_real(recomp_env_id id)
     return v && *v;
 }
 
+#include "xbox_settings_ours.inc"      /* the fork: the VR picture-quality override, xbox_SettingsPeek */
+
 void xbox_SettingsInit(const char *title)
 {
     const char *over;
@@ -1036,33 +1035,7 @@ void xbox_SettingsInit(const char *title)
     for (i = 0; i < TEXT_COUNT; i++)
         if (s_text[i].user && s_text[i].val[0] && !s_text[i].locked)
             sx_setenv_keep(recomp_env_name(s_text[i].env), s_text[i].val);
-    /* In VR (the headset path set RECOMP_VR_ACTIVE) the VR page's picture quality replaces the Graphics page's: render scale,
-     * anti-aliasing, sharpening, texture LOD bias. The Graphics rows are then taken as set from outside, so they keep what
-     * the file says and are not saved over. A Graphics value the environment already set (a launcher) stays. */
-    if (getenv("RECOMP_VR_ACTIVE")) {
-        static const int k_vrmap[][2] = {
-            { XS_VR_SCALE, XS_GRAPHICS_RENDER_SCALE }, { XS_VR_AA, XS_GRAPHICS_AA },
-            { XS_VR_SHARPEN, XS_GRAPHICS_SHARPEN }, { XS_VR_LOD_BIAS, XS_GRAPHICS_LOD_BIAS },
-        };
-        for (i = 0; i < (int)(sizeof k_vrmap / sizeof k_vrmap[0]); i++) {
-            xs_setting *v = &s_set[k_vrmap[i][0]], *g = &s_set[k_vrmap[i][1]];
-            char buf[32];
-            const char *e = v->locked ? getenv(recomp_env_name(v->env)) : NULL;
-
-            if (g->locked)
-                continue;
-            if (e && *e)
-                snprintf(buf, sizeof buf, "%s", e);
-            else
-                xbox_SettingEnvString(v, v->value, buf, sizeof buf);
-#if defined(_WIN32)
-            _putenv_s(recomp_env_name(g->env), buf);
-#else
-            setenv(recomp_env_name(g->env), buf, 1);
-#endif
-            g->locked = 1;
-        }
-    }
+    xs_ours_after_load();       /* the fork: in VR the VR page's picture quality (xbox_settings_ours.inc) */
     /* recomp_save_dir read the table before these were set. */
     recomp_env_reload();
     XR_NOTICE( LOGP "%s\n", s_path);
@@ -1271,34 +1244,4 @@ void xbox_SettingsSetBackground(int bg)
         return;
     s_background = bg != 0;
     apply_audio();
-}
-
-int xbox_SettingsPeek(const char *title, const char *key, char *out, unsigned n)
-{
-    char path[512], err[128];
-    const char *over = getenv("RECOMP_SETTINGS"), *v;
-    recomp_cfg *c;
-
-    if (!out || !n)
-        return 0;
-    out[0] = 0;
-    if (over && !strcmp(over, "none"))
-        return 0;
-    if (over && *over) {
-        snprintf(path, sizeof path, "%s", over);
-    } else {
-        const char *dir = recomp_save_dir(title);
-
-        if (!dir || !*dir)
-            return 0;
-        snprintf(path, sizeof path, "%s/settings.toml", dir);
-    }
-    c = recomp_cfg_load_file_flags(path, RCFG_REOPEN_TABLES, err, sizeof err);
-    if (!c)
-        return 0;
-    v = recomp_cfg_string(c, key, NULL);
-    if (v && *v)
-        snprintf(out, n, "%s", v);
-    recomp_cfg_free(c);
-    return out[0] != 0;
 }

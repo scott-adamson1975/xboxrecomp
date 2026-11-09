@@ -116,9 +116,7 @@ typedef enum {
     XS_ONLINE_REACTIONS,     /* BO-352: show the quick reactions other players send, on by default; read at the start */
     XS_GAME_LANGUAGE,        /* the dashboard language the kernel reports (XC_LANGUAGE); a row only where the title has more than one */
     XS_GRAPHICS_SOFTBODY,    /* a title's soft-body vehicle damage (drawn only), off as shipped; read at start */
-#include "xbox_settings_wheel_ids.inc"   /* XS_WHEEL_*: the racing wheel settings */
-#include "xbox_settings_simhub_ids.inc"   /* XS_SIMHUB_*: the SimHub telemetry settings */
-#include "xbox_settings_vr_ids.inc"         /* XS_VR_*: the VR page's settings */
+#include "xbox_settings_ours_ids.inc"   /* the fork's ids: wheel, SimHub, VR */
 #if defined(__ANDROID__)
     XS_INPUT_VIBRATION,      /* pad motors or the device's vibrator (android_vibration.c) */
     XS_INPUT_TOUCH,          /* the on-screen controls: auto / always / off (touch_pad.h) */

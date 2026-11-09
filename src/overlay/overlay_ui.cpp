@@ -507,9 +507,7 @@ static constexpr Meta k_meta[XS_COUNT] = {
     /* XS_ONLINE_REACTIONS */ { XS_ONLINE_REACTIONS, "Quick reactions", "Shows the quick reactions (GG, LET'S GO! and the like) the other players send with the d-pad in the game lobby and on the results screen. Off hides them; the reactions are still sent.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GAME_LANGUAGE */      { XS_GAME_LANGUAGE, "Language", "The language of the game's text, speech and films, as an Xbox set to that language would show them. Only the languages on your disc are offered.", 1, FMT_PLAIN, n_language, 0 },
     /* XS_GRAPHICS_SOFTBODY */  { XS_GRAPHICS_SOFTBODY, "Soft-body damage", "Cars crumple, tear and bend where they are hit, with the game's own sparks and debris where metal rips, instead of only losing panels. Drawn only: handling and the race are unchanged. Costs CPU in big pile-ups.", 1, FMT_PLAIN, NULL, 0 },
-#include "overlay_wheel_meta.inc"   /* the racing wheel settings: labels and hints */
-#include "overlay_simhub_meta.inc"   /* the SimHub telemetry settings: labels and hints */
-#include "overlay_vr_meta.inc"        /* the VR settings: labels and hints */
+#include "overlay_ours_meta.inc"   /* the fork's labels and hints: wheel, SimHub, VR */
 #if defined(__ANDROID__)
     /* XS_INPUT_VIBRATION */    { XS_INPUT_VIBRATION, "Vibration", "Where rumble goes. Auto uses this device's vibrator while its built-in controls are in use. External controllers don't rumble on Android; This device vibrates anyway.", 1, FMT_PLAIN, n_vibration, 0 },
     /* XS_INPUT_TOUCH */        { XS_INPUT_TOUCH, "Touch controls", "On-screen controls. In a race: steer with the left thumb anywhere on the left half, GAS, BRAKE and BOOST on the right (BOOST keeps accelerating). In menus: a d-pad and A B X Y. Pause and this menu are at the top, left of centre. Auto hides them while a controller is used and shows them again when you touch the screen.", 1, FMT_PLAIN, n_touch, 0 },
@@ -4475,9 +4473,7 @@ static void gesture_scroll()
     ImGui::SetScrollY(ImGui::GetScrollY() - ImGui::GetIO().MouseDelta.y);
 }
 
-#include "overlay_wheel.inc"              /* the Wheel and Wheel test pages */
-#include "overlay_simhub.inc"             /* the SimHub page */
-#include "overlay_vr.inc"              /* the VR page */
+#include "overlay_ours.inc"       /* the fork's pages: wheel, SimHub, VR */
 
 /* One row. `fs` is the label's size, `rh` the pitch; the columns are the
  * layout's. */
