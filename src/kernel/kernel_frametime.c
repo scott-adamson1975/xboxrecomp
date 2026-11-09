@@ -623,7 +623,7 @@ static int frametime_on(void)
         fprintf(s_out, "flip,t_ms,frame_ms,iv,late,ex_hold,ex_busy,ex_draw,ex_present,"
                 "ex_idle,g_game,g_d3d,g_xdk,g_spin,g_host,g_wait,g_threads,cpu_proc,"
                 "g_io,g_runq,m_game,m_d3d,m_xdk,m_spin,m_host,m_wait,m_io,m_runq,ex_cpu,"
-                "gpu_ms,tu_ms,tu_pred\n");
+                "gpu_ms,tu_ms,tu_pred,steps,idle_gwait,idle_grun,wait_va\n");
         fflush(s_out);
         ring_start();
         build_table();
@@ -835,7 +835,8 @@ void xbox_FrametimeFlip(uint32_t flip, uint32_t iv, int late, uint64_t hold,
                         uint64_t scan, uint64_t draw, uint64_t present)
 {
     static uint64_t t0, last, p_hold, p_scan, p_draw, p_pres, p_cpu, p_self;
-    uint64_t now, cpu, self, frame, d_hold, d_scan;
+    uint64_t now, cpu, self, frame, d_hold, d_scan, ig, ir;
+    uint32_t iva;
     LONG c[B_COUNT], m[B_COUNT];
     int64_t rq, mrq;
     const double per = 1.0 / 1000.0;   /* the buckets hold microseconds */
@@ -866,11 +867,13 @@ void xbox_FrametimeFlip(uint32_t flip, uint32_t iv, int late, uint64_t hold,
         return;
     }
     frame = now - last;
+    xbox_IdleSplitTake(&ig, &ir, &iva);
     d_hold = hold - p_hold;
     d_scan = scan - p_scan;
     n = snprintf(row, sizeof row, "%u,%.3f,%.3f,%u,%d,%.3f,%.3f,%.3f,%.3f,%.3f,"
             "%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%ld,%.3f,"
-            "%.2f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f\n",
+            "%.2f,%.3f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.3f,%.3f,%.3f,%.3f,%.3f,"
+            "%d,%.3f,%.3f,%08x\n",
             flip, (now - t0) / 1e6, frame / 1e6, iv, late,
             d_hold / 1e6, (double)(int64_t)(d_scan - d_hold) / 1e6,
             (draw - p_draw) / 1e6, (present - p_pres) / 1e6,
@@ -882,7 +885,8 @@ void xbox_FrametimeFlip(uint32_t flip, uint32_t iv, int late, uint64_t hold,
             m[B_GAME] * per, m[B_D3D] * per, m[B_XDK] * per, m[B_SPIN] * per,
             m[B_HOST] * per, m[B_WAIT] * per, m[B_IO] * per, mrq / 1e6,
             self > p_self && p_self ? (self - p_self) / 1e6 : 0.0,
-            b2d(s_gpu_bits), b2d(s_tu_bits), b2d(s_tup_bits));
+            b2d(s_gpu_bits), b2d(s_tu_bits), b2d(s_tup_bits),
+            xbox_PictureStepsCur(), ig / 1e6, ir / 1e6, iva);
     if (n > 0 && (size_t)n < sizeof row && !ring_put(row, (size_t)n, (flip & 63) == 0)) {
         fputs(row, s_out);
         if ((flip & 63) == 0)

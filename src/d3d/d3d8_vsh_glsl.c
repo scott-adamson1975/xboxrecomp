@@ -286,8 +286,10 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
         "/* Auto-generated NV2A vertex program (GLSL, Vulkan) */\n"
         "layout(set = 0, binding = 0, std140) uniform VsC { vec4 c[%d]; };\n"
         D3D8_GLSL_VPCONSTS
-        D3D8_GLSL_VS_OUT
-        D3D8_GLSL_SATURATE, NV2A_VS_MAX_CONSTANTS);
+        "%s"
+        D3D8_GLSL_SATURATE, NV2A_VS_MAX_CONSTANTS,
+        (flags & D3D8_GLSL_SCREEN_SPACE) && (flags & D3D8_GLSL_CLIP_RANGE)
+            ? D3D8_GLSL_VS_OUT_CLIP : D3D8_GLSL_VS_OUT);
     if (flags & D3D8_GLSL_EYE_PC)
         sb_append(&sb, "layout(push_constant) uniform EyePC { float k; float ui; } eyepc;\n");
     for (i = 0, k = 0; i < NV2A_VS_MAX_INPUTS; i++)
@@ -341,7 +343,15 @@ int d3d8_vsh_generate_glsl(const NV2AVshProgram *program, unsigned flags,
              * on Metal and D3D11. (xemu clamps depth instead,
              * hw/xbox/nv2a/pgraph/vk/draw.c depthClampEnable.) */
             "    if (pz > pw && pz <= pw * 1.000001) pz = pw;\n"
-            "    gl_Position = vec4((oPos.xy * vp.vp_scale.xy + vp.vp_off.xy) * pw, pz, pw);\n"
+            "    gl_Position = vec4((oPos.xy * vp.vp_scale.xy + vp.vp_off.xy) * pw, pz, pw);\n");
+        if (flags & D3D8_GLSL_CLIP_RANGE)
+            /* BO-332: the title's clip range instead of the far plane (see
+             * d3d8_glsl.h). Window z times w is linear in clip space, so
+             * the clipper cuts where xemu's per-fragment test would. */
+            sb_append(&sb,
+            "    gl_ClipDistance[0] = vp.spec_ctl.z != 0u ? pz - vp.vp_off.z * pw : pw;\n"
+            "    gl_ClipDistance[1] = vp.spec_ctl.z != 0u ? vp.vp_off.w * pw - pz : pw;\n");
+        sb_append(&sb,
             "    {\n"
             "        float fd = oFog.x, ff = 1.0;\n"
             "        if (vp.fog_ctl.x != 0u) {\n"

@@ -45,6 +45,7 @@
 #include "nv2a_vsh_cpu.h"
 #include "nv2a_combiner.h"
 #include "nv2a_pb_state.h"
+#include "nv2a_pb_split.h"
 #if defined(__linux__)
 #include <errno.h>
 #include <unistd.h>
@@ -910,6 +911,7 @@ static void dump_present_bmp(void)
  * by commas, spaces or newlines; append to the file rather than rewrite it
  * (a change is seen by its size or time). The file may not exist yet. */
 #include <sys/stat.h>
+static uint32_t s_dumping;      /* the listed flip being written, + 1 */
 static int s_dump_at_n = -1;
 static uint32_t s_dump_at_lo[64], s_dump_at_hi[64];
 static const char *s_dump_at_file;
@@ -1074,10 +1076,31 @@ static void dump_at_flip(uint32_t flip)
     if (!here || !prefix || !nv2a_pb_dump_at_listed(flip))
         return;
     snprintf(path, sizeof path, "%sflip_%05u.bmp", prefix, flip);
+    s_dumping = flip + 1u;
     if (!write_present_bmp(path))
         fprintf(stderr, "  [GPU] flip %u: fb_dump_at dump failed\n", flip);
     else if (s_dump_at_file)    /* a driver waits for this line */
         fprintf(stderr, "  [GPU] fb_dump_at: dumped %s\n", path);
+    s_dumping = 0;
+}
+
+/* RECOMP_DEBUG=fb_dump_host=1 (BO-385): while a listed flip is written, a
+ * backend that writes a scaled target back hands its host pixels here
+ * first, and they go out at their own size beside the guest-size dump, as
+ * <prefix>host_flip_NNNNN.bmp: what render.scale draws, which the 640-wide
+ * dump averages away. */
+void nv2a_pb_dump_host_px(const uint8_t *px, uint32_t hw, uint32_t hh)
+{
+    static int on = -1;
+    const char *prefix = recomp_env(RENV_FB_DUMP);
+    char path[512];
+
+    if (on < 0)
+        on = recomp_env_on(RENV_FB_DUMP_HOST);
+    if (!on || !s_dumping || !prefix || !px)
+        return;
+    snprintf(path, sizeof path, "%shost_flip_%05u.bmp", prefix, s_dumping - 1u);
+    write_bmp_at(path, px, hw * 4u, hw, hh, 4, 0);
 }
 
 /* Write the current surface out as a 24-bit BMP.
@@ -2227,6 +2250,12 @@ static int vsh_method(uint32_t method, uint32_t param)
         s_vsh.shader_ctl = (s_vsh.shader_ctl & ~0xFFFu) | (param & 0xFFFu); return 1;
     case 0x1E78:                        /* SET_SHADER_OTHER_STAGE_INPUT */
         s_vsh.shader_ctl = (s_vsh.shader_ctl & ~0xFFFF000u) | (param & 0xFFFF000u); return 1;
+    case 0x0394:                        /* SET_CLIP_MIN */
+        s_vsh.clip_min = param; s_vsh.clip_set = 1; return 1;
+    case 0x0398:                        /* SET_CLIP_MAX */
+        s_vsh.clip_max = param; s_vsh.clip_set = 1; return 1;
+    case 0x1D78:                        /* SET_ZMIN_MAX_CONTROL */
+        s_vsh.zminmax = param; return 1;
     case NV097_SET_FOG_ENABLE_M:        s_vsh.fog_enable = param != 0;  return 1;
     case NV097_SET_FOG_COLOR_M:         s_vsh.fog_color = param;        return 1;
     case NV097_SET_ALPHA_TEST_ENABLE_M: s_vsh.atest_enable = param != 0; return 1;
@@ -2673,6 +2702,111 @@ void nv2a_pb_perf_scan_end(void)
     s_perf.scan += now - s_perf.scan_t0;
     s_perf.scan_all += now - s_perf.scan_t0;
     s_perf.scan_t0 = now;
+}
+
+/* RECOMP_TRACE=pb_split=<file>[:<n>] (nv2a_pb_split.h, BO-282.12): the
+ * walker's and the Vulkan backend's counters, one line a flip, written here
+ * where the frametime trace takes the executor's totals, so a line's flip is
+ * ft.csv's. Times are the sampled ticks as microseconds, unscaled: the
+ * analysis scales a class by its headers over its timed headers. */
+static FILE *s_split_out;
+static uint64_t s_split_tick0, s_split_ns0;
+
+static const char *const s_split_cls[PBS_N] = {
+    "state", "xconst", "xprog", "xff", "comb", "tex", "vfmt", "index", "inline", "begin",
+    "imm", "surf", "clear", "sync", "flip", "other"
+};
+static const char *const s_split_kind[PBD_N] = { "array", "inline", "imm" };
+static const char *const s_split_vk[VKS_N] = {
+    "vs", "surface", "stages", "fs", "prim", "vpc", "tex", "hdrz", "ubo", "gather",
+    "tset", "enc", "pso", "cmd"
+};
+static const char *const s_split_vkx[VKX_N] = { "texbind", "cube", "rttex", "sampler" };
+
+void nv2a_split_flip(uint32_t flip)
+{
+    static int tried;
+    struct nv2a_split *s = nv2a_split, keep;
+    uint64_t tick, ns;
+    double us;
+    int i;
+
+    if (!tried) {
+        const char *e = recomp_env(RENV_PB_SPLIT);
+        char path[1024];
+        const char *colon;
+        unsigned rate = 4;
+        tried = 1;
+        if (!e || !*e || !strcmp(e, "0") || !strcmp(e, "1"))
+            return;
+        snprintf(path, sizeof path, "%s", e);
+        colon = strrchr(e, ':');
+        if (colon && colon[1] >= '0' && colon[1] <= '9' && !strchr(colon, '/')
+                && !strchr(colon, '\\')) {
+            rate = (unsigned)atoi(colon + 1);
+            path[colon - e] = 0;
+        }
+        s_split_out = fopen(path, "w");
+        s = (struct nv2a_split *)calloc(1, sizeof *s);
+        if (!s_split_out || !s) {
+            fprintf(stderr, "  [GPU] pb_split: cannot write %s\n", path);
+            free(s);
+            return;
+        }
+        s->rate = rate ? rate : 1;
+        s->rng = 0x9E3779B9u;
+        s_split_tick0 = nv2a_split_tick();
+        s_split_ns0 = rt_now();
+        fprintf(s_split_out, "flip,t_ms,ns_per_tick,rate");
+        for (i = 0; i < PBS_N; i++)
+            fprintf(s_split_out, ",h_%s,w_%s,ht_%s,us_%s", s_split_cls[i], s_split_cls[i],
+                    s_split_cls[i], s_split_cls[i]);
+        fprintf(s_split_out, ",draws,draws_timed");
+        for (i = 0; i < VKS_N; i++)
+            fprintf(s_split_out, ",vk_%s_us", s_split_vk[i]);
+        for (i = 0; i < VKX_N; i++)
+            fprintf(s_split_out, ",x_%s_n,x_%s_us", s_split_vkx[i], s_split_vkx[i]);
+        for (i = 0; i < PBD_N; i++)
+            fprintf(s_split_out, ",d_%s,v_%s,d_%s_us", s_split_kind[i], s_split_kind[i],
+                    s_split_kind[i]);
+        fprintf(s_split_out, ",rehash,rehash_kb,rehash_us,up,up_new,up_kb,up_us,own,own_kb,"
+                "own_us,cube_copies,syncs,sync_us\n");
+        fprintf(stderr, "  [GPU] pb_split: one line per flip into %s, 1 in %u timed\n",
+                path, s->rate);
+        nv2a_split = s;
+        return;             /* the first line is the next flip's */
+    }
+    if (!s)
+        return;
+    tick = nv2a_split_tick();
+    ns = rt_now();
+    us = tick > s_split_tick0 ? (double)(ns - s_split_ns0) / (double)(tick - s_split_tick0) / 1e3
+                              : 0.0;
+    fprintf(s_split_out, "%u,%.3f,%.6f,%u", flip, ns / 1e6, us * 1e3, s->rate);
+    for (i = 0; i < PBS_N; i++)
+        fprintf(s_split_out, ",%u,%u,%u,%.1f", s->hdr[i], s->words[i], s->hdr_timed[i],
+                (double)s->hdr_ticks[i] * us);
+    fprintf(s_split_out, ",%u,%u", s->draws, s->draws_timed);
+    for (i = 0; i < VKS_N; i++)
+        fprintf(s_split_out, ",%.1f", (double)s->vk_ticks[i] * us);
+    for (i = 0; i < VKX_N; i++)
+        fprintf(s_split_out, ",%u,%.1f", s->vkx_calls[i], (double)s->vkx_ticks[i] * us);
+    for (i = 0; i < PBD_N; i++)
+        fprintf(s_split_out, ",%u,%u,%.1f", s->kd[i], s->kv[i], (double)s->kd_ns[i] / 1e3);
+    fprintf(s_split_out, ",%u,%u,%.1f,%u,%u,%u,%.1f,%u,%u,%.1f,%u,%u,%.1f\n", s->rehash,
+            s->rehash_kb, (double)s->rehash_ticks * us, s->up, s->up_new, s->up_kb,
+            (double)s->up_ticks * us, s->own_hash, s->own_kb, (double)s->own_ticks * us,
+            s->cube_copies, s->syncs, (double)s->sync_ticks * us);
+    if ((flip & 63u) == 0)
+        fflush(s_split_out);
+    /* The open header (FLIP_STALL's, now) and the sampler carry over. */
+    keep = *s;
+    memset(s, 0, sizeof *s);
+    s->rate = keep.rate;
+    s->rng = keep.rng;
+    s->open_t0 = keep.open_t0;
+    s->open_cls = keep.open_cls;
+    s->draw_t = keep.draw_t;
 }
 
 /* ---- Texture stages and register combiners ----------------------------
@@ -5495,6 +5629,12 @@ static void draw_primitive(void)
             uint64_t d_ns = rt_now() - t0;
             s_perf.draw += d_ns;
             s_perf.draw_all += d_ns;
+            if (nv2a_split) {       /* RECOMP_TRACE=pb_split (BO-282.12) */
+                int k = !s_gpu.inline_active ? PBD_ARRAY : s_gpu.imm_count ? PBD_IMM : PBD_INLINE;
+                nv2a_split->kd[k]++;
+                nv2a_split->kv[k] += s_gpu.idx_count;
+                nv2a_split->kd_ns[k] += d_ns;
+            }
         }
         if (s_backend->writes_back)
             s_gpu_backend_batches++;
@@ -6491,12 +6631,179 @@ static inline void inline_array(uint32_t param)
                         " the rest is dropped\n", (unsigned)NV_MAX_INLINE);
 }
 
+static int s_exec_inited;   /* nv2a_pb_exec_method's first call has run */
+
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "nv2a_pb_exec_run copies ARRAY_ELEMENT16 words as their two 16-bit halves in memory order"
+#endif
+
+/* nv2a_pb_state.h: n parameter words of one non-incrementing header on
+ * subchannel 0, ARRAY_ELEMENT16 or INLINE_ARRAY, all at once: what n calls
+ * of nv2a_pb_exec_method would do with them (array_element16 and
+ * inline_array, word by word), as one copy and one limit check (BO-282:
+ * ARRAY_ELEMENT16 is half a race frame's words, and a call per word was
+ * most of the walker's time). */
+int nv2a_pb_exec_run(uint32_t method, const uint32_t *w, uint32_t n)
+{
+    uint32_t room, m;
+
+    if (!s_exec_inited
+            || (method != NV097_ARRAY_ELEMENT16 && method != NV097_INLINE_ARRAY))
+        return 0;
+    s_perf.methods += n;
+    if (!s_gpu.prim || !n)
+        return 1;
+    if (method == NV097_ARRAY_ELEMENT16) {
+        /* Two 16-bit indices a word, low half first: the words' bytes in
+         * order on a little-endian host. Whole words while two slots are
+         * left, then (one slot left) the first half of the next, and the
+         * batch is cut. */
+        room = NV_MAX_INDICES - s_gpu.idx_count;
+        m = n < room / 2u ? n : room / 2u;
+        memcpy(&s_gpu.idx[s_gpu.idx_count], w, (size_t)m * 4u);
+        s_gpu.idx_count += 2u * m;
+        if (m < n) {
+            if (s_gpu.idx_count < NV_MAX_INDICES)
+                s_gpu.idx[s_gpu.idx_count++] = (uint16_t)(w[m] & 0xFFFF);
+            note_idx_overflow();
+        }
+        return 1;
+    }
+    room = NV_MAX_INLINE - s_gpu.inline_count;
+    m = n < room ? n : room;
+    memcpy(&s_gpu.inline_buf[s_gpu.inline_count], w, (size_t)m * 4u);
+    s_gpu.inline_count += m;
+    if (m < n) {
+        if (!s_inline_overflow)
+            fprintf(stderr, "  [GPU] INLINE_ARRAY batch over %u dwords:"
+                            " the rest is dropped\n", (unsigned)NV_MAX_INLINE);
+        s_inline_overflow += n - m;
+    }
+    return 1;
+}
+
+
+/* nv2a_pb_state.h (BO-282.12): an immediate-mode run from the walker. A
+ * spark shower or a debris cloud is drawn a vertex at a time, three or four
+ * headers a vertex (colour, texture coordinate, position), up to 165 000
+ * headers a picture; through nv2a_pb_exec_method each parameter word paid
+ * for the surface-trace tests, vsh_method's chain of ranges and the switch,
+ * none of which these methods ever match (~36 ns a header on a Ryzen 7700X,
+ * 3.5 ms of a crash camera's picture). Here each word does what the default
+ * case's two handlers, vsh_inline_attr then imm_vertex_method, do for it
+ * (imm_word): xemu's pgraph.c gives each method the same two steps, the
+ * attribute's inline value, then pgraph_finish_inline_buffer_vertex on the
+ * position's last component. The run stops at the end of the
+ * method range it starts in, so a header that runs on into other methods
+ * leaves those to the per-word path. RECOMP_DEBUG=pb_imm=0 is the A/B. */
+static int s_imm_fast = -1;             /* -1 unread; RECOMP_DEBUG=pb_imm=0 */
+
+static uint32_t imm_span(uint32_t method)
+{
+    uint32_t end;
+    if (method >= NV097_SET_VERTEX_DATA2F_M
+            && method < NV097_SET_VERTEX_DATA4F_M + NV_VERTEX_ATTRS * 16)
+        end = NV097_SET_VERTEX_DATA4F_M + NV_VERTEX_ATTRS * 16;  /* 2F, 2S, 4UB, 4S, 4F */
+    else if (method >= NV097_SET_VERTEX4F && method < NV097_SET_VERTEX4F + 16)
+        end = NV097_SET_VERTEX4F + 16;
+    else if (method >= NV097_SET_VERTEX3F && method < NV097_SET_VERTEX3F + 12)
+        end = NV097_SET_VERTEX3F + 12;
+    else
+        return 0;
+    return (end - method) / 4u;
+}
+
+/* One parameter word of a method imm_span accepted: vsh_inline_attr's store
+ * and imm_vertex_method's test, the form found once by the 64-byte block
+ * of 0x1880..0x1AFF instead of by two chains of ranges. tests/nv2a_pb_walk
+ * holds it to the per-word path bit for bit. */
+static inline void imm_word(uint32_t method, uint32_t param)
+{
+    uint32_t off;
+    float *d;
+
+    if (method >= NV097_SET_VERTEX_DATA2F_M) {
+        off = method - NV097_SET_VERTEX_DATA2F_M;
+        switch (off >> 6) {
+        case 0: case 1:                         /* DATA2F: attribute off / 8 */
+            d = s_vsh.inl[off >> 3];
+            d[(off >> 2) & 1] = u2f(param);
+            d[2] = 0.0f; d[3] = 1.0f;
+            if (off == 4)
+                imm_emit_vertex();
+            return;
+        case 2:                                 /* DATA2S */
+            off -= NV097_SET_VERTEX_DATA2S_M - NV097_SET_VERTEX_DATA2F_M;
+            d = s_vsh.inl[off >> 2];
+            d[0] = (float)(int16_t)(param & 0xFFFF);
+            d[1] = (float)(int16_t)(param >> 16);
+            d[2] = 0.0f; d[3] = 1.0f;
+            if (off == 0)
+                imm_emit_vertex();
+            return;
+        case 3:                                 /* DATA4UB */
+            off -= NV097_SET_VERTEX_DATA4UB - NV097_SET_VERTEX_DATA2F_M;
+            d = s_vsh.inl[off >> 2];
+            d[0] = (float)( param        & 0xFF) / 255.0f;
+            d[1] = (float)((param >>  8) & 0xFF) / 255.0f;
+            d[2] = (float)((param >> 16) & 0xFF) / 255.0f;
+            d[3] = (float)( param >> 24        ) / 255.0f;
+            if (off == 0)
+                imm_emit_vertex();
+            return;
+        case 4: case 5:                         /* DATA4S */
+            off -= NV097_SET_VERTEX_DATA4S_M_M - NV097_SET_VERTEX_DATA2F_M;
+            d = s_vsh.inl[off >> 3];
+            d[((off >> 2) & 1) * 2]     = (float)(int16_t)(param & 0xFFFF);
+            d[((off >> 2) & 1) * 2 + 1] = (float)(int16_t)(param >> 16);
+            if (off == 4)
+                imm_emit_vertex();
+            return;
+        default:                                /* DATA4F, 0x1A00.. */
+            off -= NV097_SET_VERTEX_DATA4F_M - NV097_SET_VERTEX_DATA2F_M;
+            s_vsh.inl[off >> 4][(off >> 2) & 3] = u2f(param);
+            if (off == 12)
+                imm_emit_vertex();
+            return;
+        }
+    }
+    if (method >= NV097_SET_VERTEX4F) {         /* w completes it */
+        s_vsh.inl[0][(method - NV097_SET_VERTEX4F) / 4] = u2f(param);
+        if (method == NV097_SET_VERTEX4F + 12)
+            imm_emit_vertex();
+        return;
+    }
+    s_vsh.inl[0][(method - NV097_SET_VERTEX3F) / 4] = u2f(param);   /* z; w is 1 */
+    s_vsh.inl[0][3] = 1.0f;
+    if (method == NV097_SET_VERTEX3F + 8)
+        imm_emit_vertex();
+}
+
+uint32_t nv2a_pb_exec_imm(uint32_t method, const uint32_t *w, uint32_t n)
+{
+    uint32_t m, i;
+
+    if (s_imm_fast < 0) {
+        const char *e = recomp_env(RENV_PB_IMM);
+        s_imm_fast = !(e && e[0] == '0');
+    }
+    if (!s_exec_inited || !s_imm_fast)
+        return 0;
+    m = imm_span(method);
+    if (m > n)
+        m = n;
+    for (i = 0; i < m; i++, method += 4)
+        imm_word(method, w[i]);
+    s_perf.methods += m;
+    return m;
+}
+
+
 void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
 {
-    static int inited;
-    if (!inited) {
+    if (!s_exec_inited) {
         int a;
-        inited = 1;
+        s_exec_inited = 1;
         s_gpu.min_x = s_gpu.min_y = 1e30f;
         s_gpu.max_x = s_gpu.max_y = -1e30f;
         /* An attribute no SET_VERTEX_DATA* ever wrote reads (0, 0, 0, 1),
@@ -6893,6 +7200,8 @@ void nv2a_pb_exec_method(uint32_t subch, uint32_t method, uint32_t param)
             xbox_FrametimeFlip(s_gpu.flips, s_last_iv, s_last_late, s_hold_all,
                                s_perf.scan_all + (rt_now() - s_perf.scan_t0),
                                s_perf.draw_all, s_perf.flip_all);
+            nv2a_split_flip(s_gpu.flips); /* RECOMP_TRACE=pb_split (BO-282.12) */
+            xbox_PictureStepsFlip();      /* BO-282.6/.7: the next picture's steps */
             if (flip_pacing_on())
                 xbox_PacingFlipCadence(s_last_iv, s_last_late, s_hold_all,
                                        s_perf.scan_all + (rt_now() - s_perf.scan_t0));

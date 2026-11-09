@@ -214,6 +214,16 @@ static volatile LONG s_irq_line;
  * 0xFFFFFFBE). A guest that halts the front end itself and later acks
  * anything got the same stale replay, plus an unwanted resume. It also made
  * every trap cost two or three ISR calls instead of one. */
+/* update_irq reads ISTS and IEN, then writes GINTSTS and the line from what
+ * it read: callers hold d->lock, or a raise and a lower cross. The ISR's ack
+ * (an ISTS write on a guest thread) once ran it without the lock. It found
+ * nothing pending; the frame thread then latched a new trap and raised the
+ * line; the ack's update went on to lower it. FETINTSTS stayed set with
+ * GINTSTS clear and set_irq spent, so nothing raised the line again: the
+ * front end stayed trapped and DirectSound's stop-and-wait spun for good
+ * (BO-351, int042 Dee2 and int044 Dee1 on Windows). xemu runs both under the
+ * BQL (hw/xbox/mcpx/apu/apu.c: the frame thread takes it around update_irq,
+ * and MMIO writes arrive with it). */
 static void update_irq(MCPXAPUState *d)
 {
     if ((d->regs[NV_PAPU_IEN] & NV_PAPU_ISTS_GINTSTS) &&
@@ -222,8 +232,20 @@ static void update_irq(MCPXAPUState *d)
         qatomic_or(&d->regs[NV_PAPU_ISTS], NV_PAPU_ISTS_GINTSTS);
         InterlockedExchange(&s_irq_line, 1);
     } else {
+        if (mcpx_apu_irq_lower_hook)
+            mcpx_apu_irq_lower_hook(d);
         qatomic_and(&d->regs[NV_PAPU_ISTS], ~NV_PAPU_ISTS_GINTSTS);
         InterlockedExchange(&s_irq_line, 0);
+    }
+}
+
+void (*mcpx_apu_irq_lower_hook)(MCPXAPUState *d);
+
+void mcpx_apu_frame_irq(MCPXAPUState *d)
+{
+    if (d->set_irq) {
+        update_irq(d);
+        d->set_irq = false;
     }
 }
 
@@ -461,9 +483,15 @@ void mcpx_apu_write(void *opaque, hwaddr addr, uint64_t val,
 
     switch (addr) {
     case NV_PAPU_ISTS:
+        /* Under d->lock, as the frame thread's update_irq is (see there).
+         * The frame thread never holds it while it waits on a guest thread:
+         * it drops it before delivering or posting (apu_deliver_irq), and
+         * VP method writes already take it from the same threads. */
+        qemu_mutex_lock(&d->lock);
         qatomic_and(&d->regs[NV_PAPU_ISTS], ~(uint32_t)val);
         update_irq(d);
         qemu_cond_broadcast(&d->cond);
+        qemu_mutex_unlock(&d->lock);
         break;
     case NV_PAPU_FECTL:
     case NV_PAPU_SECTL:
@@ -1275,8 +1303,7 @@ static void throttle(MCPXAPUState *d)
                 mcpx_apu_vp_idle_scan(d);
         }
         if (d->set_irq) {
-            update_irq(d);
-            d->set_irq = false;
+            mcpx_apu_frame_irq(d);
             apu_deliver_irq(d);
             continue;
         }
@@ -1421,10 +1448,7 @@ static void *mcpx_apu_frame_thread(void *arg)
          * notification (set by the voice processor or a trapped method) into
          * the interrupt line. Nothing here ever did, so the line never rose
          * even before there was anything to deliver it to. */
-        if (d->set_irq) {
-            update_irq(d);
-            d->set_irq = false;
-        }
+        mcpx_apu_frame_irq(d);
         apu_deliver_irq(d);
 
         /* Let the guest in once per frame.

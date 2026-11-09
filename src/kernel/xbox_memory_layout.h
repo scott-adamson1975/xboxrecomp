@@ -549,8 +549,19 @@ HANDLE xbox_GetMappingHandle(void);
 uint32_t xbox_AllocThreadStack(void);
 
 /* A TIB and TLS block for a newly spawned guest thread, copied from the
- * template the loader built. Returns the new TIB's Xbox VA, or 0. */
+ * template the loader built. Returns the new TIB's Xbox VA, or 0. Every host
+ * thread that runs guest code takes one: it also gives the thread its own
+ * KTHREAD stand-in at fs:[0x28] (xbox_ThreadObjectForTib). */
 uint32_t xbox_AllocThreadTib(void);
+
+/* Bytes of TIB/KPCR per thread: through KPRCB.DpcRoutineActive, fs:[0x58]
+ * (XBOX_TIB_DPC_ACTIVE), which kernel_run_dpc sets while a DPC runs. */
+#define XBOX_TIB_SIZE       0x80u
+#define XBOX_TIB_DPC_ACTIVE 0x58u
+
+/* The calling thread's guest thread object, made on first use (kernel_bridge.c);
+ * 0 if the pool is full. Its +0x12C is a unique, never-reused thread id. */
+uint32_t xbox_ThreadObjectForTib(void);
 
 /**
  * Return a worker's stack when the worker ends. Takes the value

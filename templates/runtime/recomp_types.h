@@ -217,17 +217,62 @@ extern RECOMP_TLS uint32_t g_seh_ebp;
  * -- harmless while every guest thread ran synchronously, and not once the
  * runtime began spawning real ones.
  *
+ * xchg with a memory operand is locked on x86 too (RECOMP_ATOMIC_XCHG*).
+ *
  * Genuinely atomic, not merely correct in isolation: the guest's own threads
  * now run on real host threads, so a read-modify-write that races is exactly
  * the bug these instructions exist to prevent.
  */
+/* Widths: the 8- and 16-bit forms are what `lock add byte ptr`, `xadd
+ * word ptr` and `cmpxchg byte ptr` need; CAS64 is cmpxchg8b. Every one is a
+ * full barrier (SEQ_CST), as the x86 locked instruction is.
+ *
+ * Alignment: these are applied to whatever address the guest computed. x86
+ * allows a locked instruction on an unaligned word (a split lock); arm64
+ * faults on an unaligned exclusive or CAS. Every live site in Burnout 3
+ * addresses a compiler-aligned field, so nothing checks here; a title that
+ * trips it stops with a SIGBUS at the site rather than silently. */
 #if defined(_MSC_VER)
 #include <intrin.h>
+#define RECOMP_ATOMIC_ADD8(p, v)      ((uint8_t)_InterlockedExchangeAdd8((volatile char *)(p), (char)(v)))
+#define RECOMP_ATOMIC_ADD16(p, v)     ((uint16_t)_InterlockedExchangeAdd16((volatile short *)(p), (short)(v)))
 #define RECOMP_ATOMIC_ADD32(p, v)     ((uint32_t)_InterlockedExchangeAdd((volatile long *)(p), (long)(v)))
-#define RECOMP_ATOMIC_CAS32(p, cmp, val)     ((uint32_t)_InterlockedCompareExchange((volatile long *)(p),                                            (long)(val), (long)(cmp)))
+#define RECOMP_ATOMIC_OR8(p, v)       ((uint8_t)_InterlockedOr8((volatile char *)(p), (char)(v)))
+#define RECOMP_ATOMIC_OR16(p, v)      ((uint16_t)_InterlockedOr16((volatile short *)(p), (short)(v)))
+#define RECOMP_ATOMIC_OR32(p, v)      ((uint32_t)_InterlockedOr((volatile long *)(p), (long)(v)))
+#define RECOMP_ATOMIC_AND8(p, v)      ((uint8_t)_InterlockedAnd8((volatile char *)(p), (char)(v)))
+#define RECOMP_ATOMIC_AND16(p, v)     ((uint16_t)_InterlockedAnd16((volatile short *)(p), (short)(v)))
+#define RECOMP_ATOMIC_AND32(p, v)     ((uint32_t)_InterlockedAnd((volatile long *)(p), (long)(v)))
+#define RECOMP_ATOMIC_XOR8(p, v)      ((uint8_t)_InterlockedXor8((volatile char *)(p), (char)(v)))
+#define RECOMP_ATOMIC_XOR16(p, v)     ((uint16_t)_InterlockedXor16((volatile short *)(p), (short)(v)))
+#define RECOMP_ATOMIC_XOR32(p, v)     ((uint32_t)_InterlockedXor((volatile long *)(p), (long)(v)))
+#define RECOMP_ATOMIC_XCHG8(p, v)     ((uint8_t)_InterlockedExchange8((volatile char *)(p), (char)(v)))
+#define RECOMP_ATOMIC_XCHG16(p, v)    ((uint16_t)_InterlockedExchange16((volatile short *)(p), (short)(v)))
+#define RECOMP_ATOMIC_XCHG32(p, v)    ((uint32_t)_InterlockedExchange((volatile long *)(p), (long)(v)))
+#define RECOMP_ATOMIC_CAS8(p, cmp, val)      ((uint8_t)_InterlockedCompareExchange8((volatile char *)(p), (char)(val), (char)(cmp)))
+#define RECOMP_ATOMIC_CAS16(p, cmp, val)     ((uint16_t)_InterlockedCompareExchange16((volatile short *)(p), (short)(val), (short)(cmp)))
+#define RECOMP_ATOMIC_CAS32(p, cmp, val)     ((uint32_t)_InterlockedCompareExchange((volatile long *)(p), (long)(val), (long)(cmp)))
+#define RECOMP_ATOMIC_CAS64(p, cmp, val)     ((uint64_t)_InterlockedCompareExchange64((volatile long long *)(p), (long long)(val), (long long)(cmp)))
 #else
-#define RECOMP_ATOMIC_ADD32(p, v)     ((uint32_t)__sync_fetch_and_add((volatile uint32_t *)(p), (uint32_t)(v)))
-#define RECOMP_ATOMIC_CAS32(p, cmp, val)     ((uint32_t)__sync_val_compare_and_swap((volatile uint32_t *)(p),                                            (uint32_t)(cmp), (uint32_t)(val)))
+#define RECOMP_ATOMIC_ADD8(p, v)      ((uint8_t)__atomic_fetch_add((volatile uint8_t *)(p), (uint8_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_ADD16(p, v)     ((uint16_t)__atomic_fetch_add((volatile uint16_t *)(p), (uint16_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_ADD32(p, v)     ((uint32_t)__atomic_fetch_add((volatile uint32_t *)(p), (uint32_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_OR8(p, v)       ((uint8_t)__atomic_fetch_or((volatile uint8_t *)(p), (uint8_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_OR16(p, v)      ((uint16_t)__atomic_fetch_or((volatile uint16_t *)(p), (uint16_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_OR32(p, v)      ((uint32_t)__atomic_fetch_or((volatile uint32_t *)(p), (uint32_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_AND8(p, v)      ((uint8_t)__atomic_fetch_and((volatile uint8_t *)(p), (uint8_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_AND16(p, v)     ((uint16_t)__atomic_fetch_and((volatile uint16_t *)(p), (uint16_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_AND32(p, v)     ((uint32_t)__atomic_fetch_and((volatile uint32_t *)(p), (uint32_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_XOR8(p, v)      ((uint8_t)__atomic_fetch_xor((volatile uint8_t *)(p), (uint8_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_XOR16(p, v)     ((uint16_t)__atomic_fetch_xor((volatile uint16_t *)(p), (uint16_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_XOR32(p, v)     ((uint32_t)__atomic_fetch_xor((volatile uint32_t *)(p), (uint32_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_XCHG8(p, v)     ((uint8_t)__atomic_exchange_n((volatile uint8_t *)(p), (uint8_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_XCHG16(p, v)    ((uint16_t)__atomic_exchange_n((volatile uint16_t *)(p), (uint16_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_XCHG32(p, v)    ((uint32_t)__atomic_exchange_n((volatile uint32_t *)(p), (uint32_t)(v), __ATOMIC_SEQ_CST))
+#define RECOMP_ATOMIC_CAS8(p, cmp, val)      ((uint8_t)__sync_val_compare_and_swap((volatile uint8_t *)(p), (uint8_t)(cmp), (uint8_t)(val)))
+#define RECOMP_ATOMIC_CAS16(p, cmp, val)     ((uint16_t)__sync_val_compare_and_swap((volatile uint16_t *)(p), (uint16_t)(cmp), (uint16_t)(val)))
+#define RECOMP_ATOMIC_CAS32(p, cmp, val)     ((uint32_t)__sync_val_compare_and_swap((volatile uint32_t *)(p), (uint32_t)(cmp), (uint32_t)(val)))
+#define RECOMP_ATOMIC_CAS64(p, cmp, val)     ((uint64_t)__sync_val_compare_and_swap((volatile uint64_t *)(p), (uint64_t)(cmp), (uint64_t)(val)))
 #endif
 
 #include <setjmp.h>
@@ -447,9 +492,13 @@ static inline double recomp_frndint(double value, uint16_t control) {
     case 2: rounded=ceil(value); break;
     case 3: rounded=trunc(value); break;
     default: {
+        /* A half is rounded to the even neighbour. lo's parity from its
+         * integer value: a fraction of exactly 0.5 exists only below 2^52,
+         * where the conversion is exact (fmod(lo, 2.0) gave the same, but
+         * the compiler expands it to a fused multiply-add, BO-282.2). */
         double lo=floor(value), fraction=value-lo;
         rounded=lo;
-        if(fraction>0.5 || (fraction==0.5 && fmod(lo,2.0)!=0.0)) rounded=lo+1.0;
+        if(fraction>0.5 || (fraction==0.5 && ((int64_t)lo & 1))) rounded=lo+1.0;
         break;
     }
     }
@@ -540,6 +589,29 @@ extern volatile int g_xbox_irq_pending;
 void xbox_SpinWait(uint32_t va);
 #define RECOMP_SPIN_WAIT(va) \
     do { if (g_xbox_spin_sleep | g_xbox_irq_pending) xbox_SpinWait(va); } while (0)
+
+/* Guest memory ordering on arm64 (tools/recomp/mem_order.py, --mem-order).
+ *
+ * Plain guest accesses are volatile and nothing more, which on x86-64 is the
+ * x86 ordering the title assumes and on arm64 is none. A listed lock-release
+ * store is emitted as RECOMP_STORE_REL* (a store-release: the owner's writes
+ * before it are visible to whoever sees it), and every spin-wait candidate's
+ * exit gets RECOMP_ACQUIRE_FENCE() (the loads after the loop are ordered
+ * after the one that saw the flag). On x86-64 both are what the plain code
+ * already was: a release store is a plain mov, the acquire fence is no
+ * instruction; MSVC's /volatile:ms (the default on x86 and x64) makes the
+ * volatile store a release already, so only a compiler barrier is needed. */
+#if defined(_MSC_VER)
+#define RECOMP_STORE_REL8(addr, v)   (MEM8(addr) = (uint8_t)(v))
+#define RECOMP_STORE_REL16(addr, v)  (MEM16(addr) = (uint16_t)(v))
+#define RECOMP_STORE_REL32(addr, v)  (MEM32(addr) = (uint32_t)(v))
+#define RECOMP_ACQUIRE_FENCE()       _ReadWriteBarrier()
+#else
+#define RECOMP_STORE_REL8(addr, v)   __atomic_store_n((volatile uint8_t *)XBOX_PTR(addr), (uint8_t)(v), __ATOMIC_RELEASE)
+#define RECOMP_STORE_REL16(addr, v)  __atomic_store_n((volatile uint16_t *)XBOX_PTR(addr), (uint16_t)(v), __ATOMIC_RELEASE)
+#define RECOMP_STORE_REL32(addr, v)  __atomic_store_n((volatile uint32_t *)XBOX_PTR(addr), (uint32_t)(v), __ATOMIC_RELEASE)
+#define RECOMP_ACQUIRE_FENCE()       __atomic_thread_fence(__ATOMIC_ACQUIRE)
+#endif
 
 /* --patches (tools/recomp/patches.py): the value a patched guest load read,
  * or `value` while the setting `key` reads `when` (src/platform/

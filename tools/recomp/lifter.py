@@ -360,15 +360,18 @@ _RESULT_SNAPSHOT_SETTERS = frozenset({
     "and", "or", "xor", "adc", "sbb", "neg",
     "shl", "sal", "shr", "sar", "shld", "shrd",
     "add", "sub",
+    # xadd is an add whose flags come from the sum; the lift publishes that
+    # sum, since the memory word it was added into can move again at once.
+    "xadd",
 })
 # ...and the two whose conditions also need the SOURCE, to recover the
 # original destination from the result. Theirs goes into _fb, captured before
 # the write because `sub eax, eax` would otherwise snapshot an operand it has
 # already destroyed.
-_RESULT_SRC_SETTERS = frozenset({"add", "sub"})
+_RESULT_SRC_SETTERS = frozenset({"add", "sub", "xadd"})
 
 CF_TRACKED = frozenset({
-    "add", "sub", "adc", "sbb", "shl", "shr", "sar",
+    "add", "sub", "adc", "sbb", "shl", "shr", "sar", "xadd",
 })
 
 # bt reports CF without touching the operand, so its CF can be rebuilt at the
@@ -378,6 +381,26 @@ CF_TRACKED = frozenset({
 # captured before the write, which is what _cf is for, so they are listed
 # separately and _function_needs_cf treats them as CF producers.
 BT_MODIFY = frozenset({"bts", "btr", "btc"})
+
+def _is_locked(insn):
+    """The LOCK prefix (disasm.Instruction.locked; the tests' stand-in
+    instructions may not carry the field)."""
+    return bool(getattr(insn, "locked", False))
+
+
+def _insn_text(insn):
+    """The instruction as spelled, for a comment."""
+    text = getattr(insn, "text", None)
+    if text is None:
+        text = f"{'lock ' if _is_locked(insn) else ''}{insn.mnemonic} {getattr(insn, 'op_str', '')}"
+    return text.strip()
+
+
+# Read-modify-writes the LOCK prefix makes atomic (Lifter._lift_locked_rmw).
+# adc and sbb are not here: a locked one would need the carry folded into
+# the atomic, and no XDK title has been seen to emit one.
+_LOCKED_RMW = frozenset({"add", "sub", "and", "or", "xor", "inc", "dec",
+                         "neg", "not", "bts", "btr", "btc"})
 
 # Arithmetic that writes its destination and leaves ZF as (destination == 0).
 # A join can unify two different setters from this set when they share a
@@ -393,7 +416,8 @@ _EFLAGS_SETTERS = frozenset({
     "shld", "shrd", "rol", "ror", "rcl", "rcr",  # Shifts/rotates set CF
     "bsf", "bsr",       # Bit scan sets ZF
     "bt", "bts", "btr", "btc",  # Bit test sets CF
-    "cmpxchg",           # Compare-and-exchange sets ZF
+    "cmpxchg",           # Compare-and-exchange sets the flags of (eax - dest)
+    "cmpxchg8b",         # ... and the 64-bit one sets ZF only
     "xadd",              # Exchange-and-add sets flags
 })
 
@@ -401,7 +425,9 @@ _EFLAGS_SETTERS = frozenset({
 _FLAGS_UNDEFINED = frozenset({
     "mul", "div", "idiv",  # Flags partially undefined
     "rdtsc",               # Special instructions
-    "lock xadd",           # Lock prefix - complex flag behavior
+    # "lock xadd" is no longer a mnemonic of its own: the LOCK prefix is a
+    # flag on the Instruction (disasm.Instruction.locked), so the locked and
+    # unlocked spellings take the same flag path -- xadd, in _EFLAGS_SETTERS.
     # popfd is in neither set. It REPLACES every flag with whatever was
     # pushed, so the last comparison is gone, but the new flags are known at
     # run time: popfd is its own setter and a jcc after it reads g_eflags.
@@ -550,7 +576,8 @@ def _make_condition(jcc, flag_setter, flag_ops):
     # comparison happens. Use those rather than re-reading registers that may
     # since have changed.
     SIGNED = {"CMP_L", "CMP_LE", "CMP_G", "CMP_GE", "TEST_S"}
-    if flag_setter in ("cmp", "test", "bsf", "bsr") and len(flag_ops) >= 2:
+    if (flag_setter in ("cmp", "test", "bsf", "bsr", "cmpxchg")
+            and len(flag_ops) >= 2):
         signed = (cmp_macro in SIGNED) or (test_macro in SIGNED)
         lhs, rhs = ("_fas", "_fbs") if signed else ("_fa", "_fb")
     elif flag_setter in _RESULT_SNAPSHOT_SETTERS and flag_ops:
@@ -754,7 +781,12 @@ def _make_condition(jcc, flag_setter, flag_ops):
         return None
 
     # ── cmp: flags from (a - b), operands unchanged ──
-    if flag_setter == "cmp":
+    # cmpxchg sets every flag from (eax - dest), the compare it performed,
+    # and the lift snapshots that pair into _fa/_fb in that order. It used to
+    # snapshot them the other way round and answer je/jne only; an ordered
+    # branch after it (jb, jl...) got no condition at all, and would have
+    # compared the operands swapped if it had.
+    if flag_setter in ("cmp", "cmpxchg"):
         if cmp_macro:
             return f"{cmp_macro}({lhs}, {rhs})", desc
         if jcc == "js":
@@ -844,7 +876,10 @@ def _make_condition(jcc, flag_setter, flag_ops):
         return None
 
     # ── add: a = a + b, flags from result ──
-    if flag_setter == "add":
+    # xadd too: its flags are the sum's, published into _fa by the lift (the
+    # memory word is the destination, and re-reading it after an atomic add
+    # asks another thread's question).
+    if flag_setter in ("add", "xadd"):
         if jcc in ("je", "jz"):
             return f"({lhs} == 0)", desc
         if jcc in ("jne", "jnz"):
@@ -1047,23 +1082,13 @@ def _make_condition(jcc, flag_setter, flag_ops):
             return f"!(({lhs} >> ({rhs} & 31)) & 1)", desc
         return None
 
-    # ── cmpxchg: compares accumulator with dest, sets ZF on match ──
-    if flag_setter == "cmpxchg":
-        # ZF comes from the compare the instruction already did, and the lift
-        # snapshots it into _fa/_fb. Re-reading eax here would test a value
-        # cmpxchg may have just replaced.
+    # ── cmpxchg8b: ZF only, from the 64-bit compare the lift did ──
+    # The lift leaves _fa = (old == edx:eax) and _fb = 1.
+    if flag_setter == "cmpxchg8b":
         if jcc in ("je", "jz"):
             return "(_fa == _fb)", desc
         if jcc in ("jne", "jnz"):
             return "(_fa != _fb)", desc
-        return None
-
-    # ── xadd: exchange and add, flags from addition ──
-    if flag_setter == "xadd":
-        if jcc in ("je", "jz"):
-            return f"({lhs} == 0)", desc
-        if jcc in ("jne", "jnz"):
-            return f"({lhs} != 0)", desc
         return None
 
     # ── repe cmpsb / repne scasb: string comparison ──
@@ -1408,6 +1433,9 @@ class Lifter:
         self.unimplemented = {}
         # --patches: a patches.PatchReport, or None (nothing is patched).
         self.patches = None
+        # --mem-order: a mem_order.MemOrderReport, or None (every store is
+        # the plain volatile one).
+        self.mem_order = None
 
         # Detect if either is missing, so overriding one does not silently
         # leave the other unset -- that is the bug this whole path fixes.
@@ -1473,6 +1501,12 @@ class Lifter:
         ops = insn.operands
         nops = len(ops)
 
+        # A --mem-order release store that is not a mov to memory is an
+        # error, not a silent miss (_lift_mov applies the listed ones).
+        if (self.mem_order is not None
+                and not (m == "mov" and ops and ops[0].type == "mem")):
+            self.mem_order.release_store(insn, ops)
+
         # ── NOP ──
         if m == "nop" or (m == "lea" and nops == 2 and
                           ops[0].type == "reg" and ops[1].type == "mem" and
@@ -1497,6 +1531,16 @@ class Lifter:
             return self._lift_push(insn, ops)
         if m == "pop":
             return self._lift_pop(insn, ops)
+
+        # ── Locked read-modify-write on memory: atomic ──
+        if _is_locked(insn) and ops and ops[0].type == "mem":
+            if m in _LOCKED_RMW:
+                return self._lift_locked_rmw(insn, ops, m)
+            if m in ("adc", "sbb"):
+                # Not lifted plain: a locked one is atomic on the hardware,
+                # and a quiet non-atomic stand-in is the bug this whole
+                # family exists to avoid. Reported instead.
+                return self._unimplemented(insn, m, " (locked)")
 
         # ── Arithmetic ──
         if m in ("add", "sub", "and", "or", "xor"):
@@ -1889,43 +1933,198 @@ class Lifter:
         # read-modify-write that races is the exact bug these instructions are
         # there to prevent, so lowering them to a plain sequence would swap one
         # silent race for another.
-        # Capstone keeps the prefix in the mnemonic, so the locked and
-        # unlocked spellings both arrive here. Both lift atomically: an
-        # unlocked xadd on memory is single-CPU-safe on the console and
-        # costs nothing extra to make safe here.
-        atomic_m = m[5:] if m.startswith("lock ") else m
-        if atomic_m in ("xadd", "cmpxchg") and len(ops) >= 2:
-            width = _operand_width(ops[0]) or 4
-            if width == 4 and ops[0].type == "mem":
-                addr = _fmt_mem(ops[0])
-                src = _fmt_operand_read(ops[1])
-                if atomic_m == "xadd":
-                    # dst = dst + src, and src receives dst's old value.
-                    return [
-                        "{ uint32_t _old = RECOMP_ATOMIC_ADD32("
-                        f"XBOX_PTR({addr}), {src});",
-                        "  " + _fmt_operand_write(ops[1], "_old") + " }"
-                        f"  /* {m} */",
-                    ]
-                # cmpxchg: compare eax with dst; on a match store src, else
-                # load dst into eax. ZF says which happened, and it is
-                # snapshotted rather than recomputed -- eax may have just been
-                # overwritten, so re-reading it to decide the branch would test
-                # the wrong pair.
-                return [
-                    "{ uint32_t _cmp = eax;",
-                    "  uint32_t _old = RECOMP_ATOMIC_CAS32("
-                    f"XBOX_PTR({addr}), _cmp, {src});",
-                    "  _fa = _old; _fb = _cmp;",
-                    "  _fas = (int32_t)_fa; _fbs = (int32_t)_fb;",
-                    "  if (_old != _cmp) eax = _old; }"
-                    f"  /* {m} */",
-                ]
+        # The LOCK prefix is a flag on the instruction (Instruction.locked),
+        # so the locked and unlocked spellings both arrive here as "xadd" /
+        # "cmpxchg". Both lift atomically: an unlocked xadd on memory is
+        # single-CPU-safe on the console and costs nothing extra to make
+        # safe here.
+        if m in ("xadd", "cmpxchg") and len(ops) >= 2:
+            return self._lift_xadd_cmpxchg(insn, ops, m)
+        if m == "cmpxchg8b" and ops and ops[0].type == "mem":
+            return self._lift_cmpxchg8b(insn, ops)
 
         # ── Unhandled ──
         #
         # Recorded, not merely commented -- see self.unimplemented.
         return self._unimplemented(insn, m)
+
+    # ── Atomic read-modify-write ──
+
+    _ACC = {1: ("(eax & 0xFFu)", "al"), 2: ("(eax & 0xFFFFu)", "ax"),
+            4: ("eax", "eax")}
+
+    def _lift_xadd_cmpxchg(self, insn, ops, m):
+        """xadd and cmpxchg, 8/16/32-bit, memory or register destination.
+
+        Flags: xadd sets them from the sum, like add, and the lift publishes
+        the sum into _fa (and the source into _fb, the carry into _cf) at the
+        instruction. The old form answered a jz after `xadd [p], r` by
+        READING [p] AGAIN -- a `lock xadd [refcount], -1; jz free` would have
+        freed on whatever another thread had since made of the count, not on
+        this thread's result. cmpxchg sets them from (eax - dest), and the
+        snapshot is in that order so the cmp conditions apply unchanged.
+        """
+        width = _operand_width(ops[0]) or 4
+        if width not in self._SNAP_MASK:
+            return self._unimplemented(insn, m, " (width)")
+        mask, sx = self._SNAP_MASK[width], self._SNAP_SX[width]
+        bits = width * 8
+        src = _fmt_operand_read(ops[1])
+        dst_mem = ops[0].type == "mem"
+        out = []
+        if m == "xadd":
+            dst = _fmt_operand_read(ops[0])
+            out.append(f"{{ uint32_t _src = (uint32_t)({src}) & {mask};")
+            if dst_mem:
+                out.append(f"  uint32_t _old = RECOMP_ATOMIC_ADD{bits}("
+                           f"XBOX_PTR({_fmt_mem(ops[0])}), _src);")
+            else:
+                out.append(f"  uint32_t _old = (uint32_t)({dst}) & {mask};")
+            if self.needs_cf:
+                out.append(f"  _cf = (int)((((uint64_t)_old + (uint64_t)_src)"
+                           f" >> {bits}) & 1);")
+            out.append(f"  _fb = _src; _fbs = (int32_t){sx}(_fb);"
+                       f" _fa = (_old + _src) & {mask};"
+                       f" _fas = (int32_t){sx}(_fa); /* {m} result */")
+            # Hardware order: SRC = DEST, then DEST = sum -- so xadd eax, eax
+            # leaves the sum.
+            out.append("  " + _fmt_operand_write(ops[1], "_old"))
+            if not dst_mem:
+                out.append("  " + _fmt_operand_write(ops[0], "_fa"))
+            out[-1] += f" }}  /* {_insn_text(insn)} */"
+            return out
+        # cmpxchg: compare the accumulator with dest; on a match store src,
+        # else load dest into the accumulator. The flags are those of
+        # (accumulator - dest), snapshotted before the accumulator can change.
+        acc_read, acc_reg = self._ACC[width]
+        out.append(f"{{ uint32_t _cmp = {acc_read};")
+        if dst_mem:
+            out.append(f"  uint32_t _old = RECOMP_ATOMIC_CAS{bits}("
+                       f"XBOX_PTR({_fmt_mem(ops[0])}), _cmp,"
+                       f" (uint32_t)({src}) & {mask});")
+        else:
+            dst = _fmt_operand_read(ops[0])
+            out.append(f"  uint32_t _old = (uint32_t)({dst}) & {mask};")
+            out.append("  if (_old == _cmp) "
+                       + _fmt_operand_write(ops[0], f"(uint32_t)({src}) & {mask}"))
+        out.append(f"  _fa = _cmp; _fb = _old;"
+                   f" _fas = (int32_t){sx}(_fa); _fbs = (int32_t){sx}(_fb);")
+        out.append("  if (_old != _cmp) " + _fmt_set_reg(acc_reg, "_old")
+                   + f" }}  /* {_insn_text(insn)} */")
+        return out
+
+    def _lift_cmpxchg8b(self, insn, ops):
+        """cmpxchg8b m64: compare edx:eax with the qword; on a match store
+        ecx:ebx, else load the qword into edx:eax. ZF only, left as
+        _fa = (matched), _fb = 1 for the cmpxchg8b arm of _make_condition.
+
+        The guest address is whatever the title computed; x86 allows an
+        unaligned cmpxchg8b, arm64's 64-bit CAS does not (see the note on
+        RECOMP_ATOMIC_* in recomp_types.h)."""
+        addr = _fmt_mem(ops[0])
+        return [
+            "{ uint64_t _cmp = ((uint64_t)edx << 32) | (uint64_t)eax;",
+            "  uint64_t _new = ((uint64_t)ecx << 32) | (uint64_t)ebx;",
+            f"  uint64_t _old = RECOMP_ATOMIC_CAS64(XBOX_PTR({addr}), _cmp, _new);",
+            "  _fa = (_old == _cmp); _fb = 1u; _fas = (int32_t)_fa; _fbs = 1;",
+            "  if (_old != _cmp) { eax = (uint32_t)_old;"
+            f" edx = (uint32_t)(_old >> 32); }} }}  /* {_insn_text(insn)} */",
+        ]
+
+    def _lift_locked_rmw(self, insn, ops, m, force_cf=False):
+        """LOCK add/sub/and/or/xor/inc/dec/neg/not/bts/btr/btc on memory.
+
+        Each is one host atomic read-modify-write (RECOMP_ATOMIC_*), and the
+        flags are computed from the value the atomic returned and the source,
+        published the same way the plain lifts publish theirs (_fa/_fb, _cf),
+        so the conditions in _make_condition apply unchanged. Until now every
+        one of these was RECOMP_UNIMPL: logged once, then skipped, so a
+        `lock inc [refcount]` left the count where it was.
+
+        Burnout 3 has no live site of this family (the audit of 2026-11-03
+        counted them; the `lock add byte ptr [edx], al` hits in the XDK
+        sections are zero bytes read as code). The lift is here so the next
+        title or patch that has one gets an atomic add, not a silent no-op.
+        """
+        width = _operand_width(ops[0]) or 4
+        if width not in self._SNAP_MASK:
+            return self._unimplemented(insn, m, " (width)")
+        mask, sx = self._SNAP_MASK[width], self._SNAP_SX[width]
+        bits = width * 8
+        tail = f" }}  /* {_insn_text(insn)} */"
+        want_cf = self.needs_cf or force_cf
+
+        if m in ("bts", "btr", "btc"):
+            bit = ops[1]
+            if bit.type != "imm":
+                # Bit string: the dword at base + (offset/32)*4, bit offset%32
+                # (the reasoning is with the unlocked lift in _lift_misc).
+                off = _fmt_operand_read(bit)
+                word = (f"({_fmt_mem(ops[0])}) + (((int32_t)({off}) >> 5) * 4)")
+                index = f"(({off}) & 31)"
+                bits = 32
+            else:
+                word = _fmt_mem(ops[0])
+                index = f"({_fmt_imm(bit.imm)} & {bits - 1})"
+            op = {"bts": f"RECOMP_ATOMIC_OR{bits}(XBOX_PTR({word}), 1u << {index})",
+                  "btr": f"RECOMP_ATOMIC_AND{bits}(XBOX_PTR({word}), ~(1u << {index}))",
+                  "btc": f"RECOMP_ATOMIC_XOR{bits}(XBOX_PTR({word}), 1u << {index})"}[m]
+            out = [f"{{ uint32_t _old = {op};"]
+            if want_cf:
+                out.append(f"  _cf = (int)((_old >> {index}) & 1u); /* {m}: CF = bit before */")
+            else:
+                out.append("  (void)_old;")
+            out[-1] += tail
+            return out
+
+        addr = f"XBOX_PTR({_fmt_mem(ops[0])})"
+        if m == "not":
+            return [f"{{ (void)RECOMP_ATOMIC_XOR{bits}({addr}, {mask});{tail}"]
+        if m == "neg":
+            out = [f"{{ uint32_t _old = MEM{bits}({_fmt_mem(ops[0])});",
+                   "  for (;;) {",
+                   f"    uint32_t _seen = RECOMP_ATOMIC_CAS{bits}({addr}, _old, (0u - _old) & {mask});",
+                   "    if (_seen == _old) break;",
+                   "    _old = _seen; }"]
+            if want_cf:
+                out.append("  _cf = (int)(_old != 0);")
+            out.append(f"  _fa = (0u - _old) & {mask}; _fas = (int32_t){sx}(_fa);"
+                       f" /* neg result */{tail}")
+            return out
+        if m in ("inc", "dec"):
+            src = "1u"
+        else:
+            src = f"(uint32_t)({_fmt_operand_read(ops[1])}) & {mask}"
+        out = [f"{{ uint32_t _src = {src};"]
+        if m in ("add", "inc", "xadd"):
+            out.append(f"  uint32_t _old = RECOMP_ATOMIC_ADD{bits}({addr}, _src);")
+            result = f"(_old + _src) & {mask}"
+            if m == "add" and want_cf:
+                out.append(f"  _cf = (int)((((uint64_t)_old + (uint64_t)_src) >> {bits}) & 1);")
+        elif m in ("sub", "dec"):
+            out.append(f"  uint32_t _old = RECOMP_ATOMIC_ADD{bits}({addr}, (0u - _src) & {mask});")
+            result = f"(_old - _src) & {mask}"
+            if m == "sub" and want_cf:
+                out.append("  _cf = (int)(_old < _src);")
+        else:
+            macro = {"and": "AND", "or": "OR", "xor": "XOR"}[m]
+            c_op = {"and": "&", "or": "|", "xor": "^"}[m]
+            out.append(f"  uint32_t _old = RECOMP_ATOMIC_{macro}{bits}({addr}, _src);")
+            result = f"(_old {c_op} _src) & {mask}"
+            if want_cf:
+                out.append("  _cf = 0; /* logical op clears CF */")
+        if m in ("add", "sub"):
+            out.append(f"  _fb = _src; _fbs = (int32_t){sx}(_fb);"
+                       f" /* {m} source, before the write */")
+        out.append(f"  _fa = {result}; _fas = (int32_t){sx}(_fa);")
+        if m in ("inc", "dec"):
+            overflow_result = (1 << (bits - 1)) - (m == "dec")
+            out[-1] += (f" _fb = (_fa == 0x{overflow_result:X}u);"
+                        f" /* {m} result/SF/OF; CF unchanged */")
+        else:
+            out[-1] += f" /* {m} result */"
+        out[-1] += tail
+        return out
 
     # ── MOV family ──
 
@@ -1934,6 +2133,14 @@ class Lifter:
             return [f"/* mov: bad operands */"]
         src = _fmt_operand_read(ops[1])
         out = [_fmt_operand_write(ops[0], src)]
+        # A listed lock-release store (--mem-order): a store-release, so the
+        # owner's writes before it are visible to whoever sees it, on arm64
+        # as on x86 (mem_order.py).
+        if self.mem_order is not None and ops[0].type == "mem":
+            width = self.mem_order.release_store(insn, ops)
+            if width:
+                out = [f"RECOMP_STORE_REL{width * 8}({_fmt_mem(ops[0])}, {src});"
+                       " /* release: a lock's flag */"]
         # `mov ebp, esp` establishes this function's frame. Publish it, because
         # ebp is a per-function local and a callee with no prologue of its own
         # reads its caller's frame through ebp -- MSVC emits those routinely for
@@ -1998,6 +2205,19 @@ class Lifter:
     def _lift_xchg(self, insn, ops):
         if len(ops) < 2:
             return [f"/* xchg: bad operands */"]
+        # With memory, x86 xchg is locked: titles build their locks on it
+        # (Burnout 3's network lock: xchg [flag], 1). Two reads and writes
+        # let two threads both see the flag free, or one put back a 1 that
+        # nobody holds, and every taker after it spins.
+        mem = [o for o in ops[:2] if o.type == "mem"]
+        reg = [o for o in ops[:2] if o.type == "reg"]
+        if len(mem) == 1 and len(reg) == 1:
+            w = _operand_width(mem[0])
+            if w in (1, 2, 4):
+                return [
+                    f"{{ uint32_t _tmp = RECOMP_ATOMIC_XCHG{w * 8}((void *)XBOX_PTR({_fmt_mem(mem[0])}), {_fmt_operand_read(reg[0])});",
+                    _fmt_operand_write(reg[0], "_tmp") + " }",
+                ]
         a = _fmt_operand_read(ops[0])
         b = _fmt_operand_read(ops[1])
         return [
@@ -2117,6 +2337,9 @@ class Lifter:
     def _lift_neg(self, insn, ops, preserve_carry=False):
         if len(ops) < 1:
             return ["/* neg: no operand */"]
+        if _is_locked(insn) and ops[0].type == "mem":
+            return self._lift_locked_rmw(insn, ops, "neg",
+                                         force_cf=preserve_carry)
         val = _fmt_operand_read(ops[0])
         out = []
         if preserve_carry or self.needs_cf:
@@ -2208,8 +2431,17 @@ class Lifter:
     def _lift_imul(self, insn, ops):
         nops = len(ops)
         if nops == 1:
-            # One operand: edx:eax = eax * ops[0]
             src = _fmt_operand_read(ops[0])
+            w = _operand_width(ops[0]) or 4
+            if w == 1:
+                # imul r/m8: AX = AL * r/m8 (signed); EDX untouched.
+                return [f"{{ int16_t _r = (int16_t)((int8_t)LO8(eax) * (int8_t)({src}));"
+                        f" SET_LO16(eax, (uint16_t)_r); }}"]
+            if w == 2:
+                # imul r/m16: DX:AX = AX * r/m16 (signed).
+                return [f"{{ int32_t _r = (int32_t)(int16_t)LO16(eax) * (int32_t)(int16_t)({src});",
+                        f"  SET_LO16(eax, (uint16_t)_r); SET_LO16(edx, (uint16_t)((uint32_t)_r >> 16)); }}"]
+            # One operand: edx:eax = eax * ops[0]
             return [
                 f"{{ int64_t _r = (int64_t)(int32_t)eax * (int64_t)(int32_t){src};",
                 f"  eax = (uint32_t)_r; edx = (uint32_t)(_r >> 32); }}"
@@ -2230,6 +2462,29 @@ class Lifter:
         if len(ops) < 1:
             return [f"/* {m}: no operand */"]
         src = _fmt_operand_read(ops[0])
+        w = _operand_width(ops[0]) or 4
+        if w == 1:
+            # 8-bit forms work on AX: mul/imul AX = AL * r/m8; div/idiv
+            # AL = AX / r/m8, AH = AX % r/m8. EDX untouched.
+            if m == "mul":
+                return [f"{{ uint16_t _r = (uint16_t)(LO8(eax) * (uint8_t)({src})); SET_LO16(eax, _r); }}"]
+            if m == "div":
+                return [f"{{ uint16_t _d = LO16(eax); uint8_t _s = (uint8_t)({src});",
+                        f"  SET_LO8(eax, (uint8_t)(_d / _s)); SET_HI8(eax, (uint8_t)(_d % _s)); }}"]
+            if m == "idiv":
+                return [f"{{ int16_t _d = (int16_t)LO16(eax); int8_t _s = (int8_t)({src});",
+                        f"  SET_LO8(eax, (uint8_t)(int8_t)(_d / _s)); SET_HI8(eax, (uint8_t)(int8_t)(_d % _s)); }}"]
+        if w == 2:
+            # 16-bit forms work on DX:AX.
+            if m == "mul":
+                return [f"{{ uint32_t _r = (uint32_t)LO16(eax) * (uint16_t)({src});",
+                        f"  SET_LO16(eax, (uint16_t)_r); SET_LO16(edx, (uint16_t)(_r >> 16)); }}"]
+            if m == "div":
+                return [f"{{ uint32_t _d = ((uint32_t)LO16(edx) << 16) | LO16(eax); uint16_t _s = (uint16_t)({src});",
+                        f"  SET_LO16(eax, (uint16_t)(_d / _s)); SET_LO16(edx, (uint16_t)(_d % _s)); }}"]
+            if m == "idiv":
+                return [f"{{ int32_t _d = (int32_t)(((uint32_t)LO16(edx) << 16) | LO16(eax)); int16_t _s = (int16_t)({src});",
+                        f"  SET_LO16(eax, (uint16_t)(int16_t)(_d / _s)); SET_LO16(edx, (uint16_t)(int16_t)(_d % _s)); }}"]
         if m == "mul":
             return [
                 f"{{ uint64_t _r = (uint64_t)eax * (uint64_t){src};",
@@ -3278,6 +3533,8 @@ class Lifter:
         every site. The tally in self.unimplemented is recorded here and
         nowhere else, so every emitted marker is also a counted one.
         """
+        if _is_locked(insn):
+            m = "lock " + m
         self.unimplemented.setdefault(m, []).append(insn.address)
         text = f"{m} {insn.op_str}".strip()
         return [f'RECOMP_UNIMPL("{text}", 0x{insn.address:08X}u);'

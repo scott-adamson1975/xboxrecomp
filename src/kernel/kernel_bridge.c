@@ -27,6 +27,7 @@
 
 #include "kernel.h"
 #include "kernel_console_keys.h"
+#include "kernel_launch.h"
 #include "kernel_missing.h"
 #include "kernel_pacing.h"
 #include "kernel_wake.h"
@@ -234,7 +235,7 @@ static void kernel_data_init(void)
 
     /* KeTickCount (ordinal 156) - initialized to current tick count.
      * A background thread in main.c updates this every ~1ms. */
-    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = GetTickCount();
+    BRIDGE_MEM32(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT) = xbox_GuestTickCount();
 
     /* LaunchDataPage (ordinal 164).
      *
@@ -408,7 +409,12 @@ static ULONG g_slot_ordinals[XBOX_KERNEL_THUNK_TABLE_SIZE];
 /* Calls per ordinal, for the ranking in the periodic summary. 378 counters
  * is smaller than one of the strings this file prints. */
 static unsigned long long g_ordinal_calls[XBOX_KERNEL_THUNK_TABLE_SIZE];
-static int g_kernel_call_count = 0;
+
+/* The kernel-call counter is 64-bit so it cannot wrap. It was a signed 32-bit
+ * int, and on the int042 soak the title's stop-a-sound spin wrapped it past
+ * 2^31: negative is <= any budget, so KERNEL_LOG_ON() (count <= budget) turned
+ * full tracing back on and flooded the log with 9.5 M lines (BO-351). */
+static unsigned long long g_kernel_call_count = 0;
 
 /* How many kernel calls get logged before the log goes quiet.
  *
@@ -431,9 +437,34 @@ static long kernel_log_budget(void)
     return budget;
 }
 
-#define KERNEL_LOG_ON()      (g_kernel_call_count <= kernel_log_budget())
+/* The gate as a callable, a getter and a setter for the counter, so
+ * tests/kernel_call_count can drive the counter past its old wrap point
+ * without making two billion calls, and see both the stored count and the
+ * trace decision. Production code reaches the gate through the macros below;
+ * the test is the only other caller, which is why they carry a name rather
+ * than staying anonymous behind the macro. The budget is a non-negative long,
+ * so casting it to the counter's type is value-preserving and keeps the
+ * comparison unsigned. */
+int xbox_kernel_log_on(void)
+{
+    return g_kernel_call_count <= (unsigned long long)kernel_log_budget();
+}
+int xbox_kernel_log_on_half(void)
+{
+    return g_kernel_call_count <= (unsigned long long)(kernel_log_budget() / 2);
+}
+unsigned long long xbox_kernel_call_count(void)
+{
+    return g_kernel_call_count;
+}
+void xbox_kernel_set_call_count(unsigned long long count)
+{
+    g_kernel_call_count = count;
+}
+
+#define KERNEL_LOG_ON()      (xbox_kernel_log_on())
 /* Some sites logged at a tighter cap than the rest; keep them proportional. */
-#define KERNEL_LOG_ON_HALF() (g_kernel_call_count <= kernel_log_budget() / 2)
+#define KERNEL_LOG_ON_HALF() (xbox_kernel_log_on_half())
 
 /* Read Xbox stack arg as uint32_t.
  * After kernel_thunk_dispatch pops the dummy return address (g_esp += 4),
@@ -643,6 +674,7 @@ static void bridge_write_handle(uint32_t handle_va, HANDLE h);
 #define THOBJ_SIZE        0x200u
 #define THOBJ_SIGNAL      0x004u
 #define THOBJ_EXIT_STATUS 0x120u
+#define THOBJ_UNIQUE_ID   0x12Cu              /* ETHREAD.UniqueThread: XAPI's GetCurrentThreadId */
 #define THOBJ_MAX         256
 #define THOBJ_PER_PAGE    (0x1000u / THOBJ_SIZE)
 
@@ -714,6 +746,12 @@ static uint32_t thobj_alloc(void)
     BRIDGE_MEM32(va + 8)  = va + 8;               /* WaitListHead, empty */
     BRIDGE_MEM32(va + 12) = va + 8;
     BRIDGE_MEM32(va + THOBJ_EXIT_STATUS) = 0x103; /* STILL_ACTIVE */
+    /* A title's own locks compare this with the holder's. Never 0, the "no
+     * owner" of those locks, and never reused, as on the console. */
+    {
+        static volatile LONG next_id;
+        BRIDGE_MEM32(va + THOBJ_UNIQUE_ID) = (uint32_t)InterlockedIncrement(&next_id) * 4u;
+    }
     return va;
 }
 
@@ -796,6 +834,11 @@ static uint32_t thobj_current(void)
     return g_thread_obj_va;
 }
 
+uint32_t xbox_ThreadObjectForTib(void)
+{
+    return thobj_current();
+}
+
 static void bridge_run_thread_inline(recomp_func_t fn, uint32_t ctx1,
                                      uint32_t ctx2)
 {
@@ -836,11 +879,13 @@ static DWORD WINAPI bridge_thread_main(LPVOID param)
                             " it shares the main thread's\n");
         /* The thread object stands in for the KTHREAD, so fs:[0x28] names it
          * and its TlsData is this thread's own, at the top of its stack. */
-        if (tib && s->obj_va && s->tls_size) {
-            uint32_t top = (s->stack_top + 16) & ~0xFu;
+        if (tib && s->obj_va) {
             BRIDGE_MEM32(tib + 0x28) = s->obj_va;
-            if (bridge_layout_tls(s->obj_va, top, s->tls_size))
-                g_esp = ((top - s->tls_size) & ~0xFu) - 16;
+            if (s->tls_size) {
+                uint32_t top = (s->stack_top + 16) & ~0xFu;
+                if (bridge_layout_tls(s->obj_va, top, s->tls_size))
+                    g_esp = ((top - s->tls_size) & ~0xFu) - 16;
+            }
         }
     }
     free(s);
@@ -969,6 +1014,10 @@ static void bridge_PsCreateSystemThreadEx(void)
                 xbox_log_thread_role("guest-main", start_routine);
                 xbox_GuestThreadPin("guest-main");
                 xbox_WakeGuestThread(thobj_current());
+                /* The main TIB's fs:[0x28] object is not the thread object:
+                 * it gets the id too. */
+                BRIDGE_MEM32(BRIDGE_MEM32(g_fs_base + 0x28) + THOBJ_UNIQUE_ID) =
+                    BRIDGE_MEM32(thobj_current() + THOBJ_UNIQUE_ID);
                 /* Its TLS too: the stack is already in use, so the block
                  * comes from the heap, and the main TIB's fs:[0x28] object
                  * gets the TlsData pointer (see bridge_layout_tls). */
@@ -1721,6 +1770,20 @@ static void bridge_HalReturnToFirmware(void)
             for (i = 0; i < 8; i++)
                 fprintf(stderr, " %08X", BRIDGE_MEM32(page + 1024 + i * 4));
             fprintf(stderr, "\n");
+            /* A dashboard page (account, network settings ...): there is no
+             * dashboard, and ending the process here reads as a crash. The
+             * call fails instead; XLaunchNewImage returns the error and the
+             * title stays on its menu (kernel_launch.h). */
+            if (xbox_launch_dashboard_refused(routine, page, BRIDGE_MEM32(page),
+                                              BRIDGE_MEM32(page + 0x400))) {
+                fprintf(stderr, "  [KERNEL] HalReturnToFirmware: the title asked for the"
+                                " Xbox Dashboard (reason %u); there is none here,"
+                                " so the call fails and the title goes on\n",
+                        BRIDGE_MEM32(page + 0x400));
+                fflush(stderr);
+                g_eax = (uint32_t)STATUS_NOT_SUPPORTED;
+                return;
+            }
         } else {
             fprintf(stderr, "  [KERNEL] no launch data page set\n");
         }
@@ -1921,6 +1984,22 @@ static void ke_shadow_insert(uint32_t guest_va, HANDLE host);
 static HANDLE ke_event_shadow(uint32_t guest_va);
 static HANDLE bridge_resolve_handle(uint32_t token);
 
+/* DISPATCHER_HEADER.SignalState (+4) of a guest KEVENT, kept with the host
+ * event behind it. It was written by KeInitializeEvent only, so XDK code
+ * that reads it inline saw the initial state for ever. A mirror, not the
+ * truth: the host event decides who wakes, and an auto-reset event taken
+ * by a host wait reads 0 once that wait has returned (bridge_ke_waited). */
+static int ke_is_event(uint32_t guest_va, HANDLE h)
+{
+    return h && h == ke_shadow_lookup(guest_va) && BRIDGE_MEM8(guest_va) <= 1;
+}
+
+static void ke_event_mirror(uint32_t guest_va, HANDLE h, uint32_t state)
+{
+    if (ke_is_event(guest_va, h))
+        InterlockedExchange((volatile LONG *)XBOX_TO_NATIVE(guest_va + 4), (LONG)state);
+}
+
 /* ── KeSetEvent (ordinal 145) ────────────────────────────── */
 static void bridge_KeSetEvent(void)
 {
@@ -1938,6 +2017,8 @@ static void bridge_KeSetEvent(void)
     if (!h)
         h = XBOX_TO_NATIVE(guest_va);
     if (h) {
+        xbox_WakeSignalBegin(h);
+        ke_event_mirror(guest_va, h, 1);
         g_eax = (uint32_t)SetEvent(h);
         if (g_eax)
             xbox_WakeSignalled(h, g_xbox_kernel_caller);
@@ -1966,6 +2047,9 @@ static void bridge_KeWaitForSingleObject(void)
         h, wait_reason, wait_mode,
         (BOOLEAN)alertable, XBOX_TO_NATIVE(timeout_ptr));
     xbox_WakeWaitEnd();
+    /* A satisfied wait on a synchronization (auto-reset) event took it. */
+    if (g_eax == 0 && ke_is_event(object, h) && BRIDGE_MEM8(object) == 1)
+        ke_event_mirror(object, h, 0);
 }
 
 /* ── NtWaitForSingleObject (ordinal 233) ─────────────────── */
@@ -2005,6 +2089,7 @@ static void bridge_NtSetEvent(void)
 {
     HANDLE   handle = bridge_resolve_handle(STACK_ARG(0));
     uint32_t prev   = STACK_ARG(1);
+    xbox_WakeSignalBegin(handle);
     g_eax = (uint32_t)xbox_NtSetEvent(handle, XBOX_TO_NATIVE(prev));
     /* A guest thread of higher priority that waited on it runs first. */
     if (g_eax == 0)
@@ -2426,17 +2511,37 @@ static int kernel_run_dpc(uint32_t dpc_va, uint32_t arg1, uint32_t arg2,
     g_esp -= 4; BRIDGE_MEM32(g_esp) = context;
     g_esp -= 4; BRIDGE_MEM32(g_esp) = dpc_va;
     g_esp -= 4; BRIDGE_MEM32(g_esp) = 0;
-    if (xbox_ProfOn()) {
-        /* Begin before the raise: the gate wait inside it is the routine's. */
-        void *prev = xbox_ProfBegin(prof_kind, routine);
-        int _irql = xbox_IrqlEnterInterrupt(2);
-        long long t0 = xbox_ProfNowUs();
-        fn();
-        xbox_ProfEnd(prev, xbox_ProfNowUs() - t0);
-        xbox_IrqlLeaveInterrupt(_irql);
-        return 1;
+    /* KPRCB.DpcRoutineActive, fs:[0x58]: non-zero while the processor runs
+     * a DPC. D3D and DirectSound branch on it (0x2F3FA9 and the
+     * KeSaveFloatingPointState pairs in Burnout 3). Written on the running
+     * thread's own TIB and put back after, so a DPC drained on a thread that
+     * was already in one leaves it set. */
+    {
+        volatile uint8_t *active = g_fs_base
+            ? (volatile uint8_t *)XBOX_TO_NATIVE(g_fs_base + XBOX_TIB_DPC_ACTIVE)
+            : NULL;
+        uint8_t was = active ? *active : 0;
+
+        if (xbox_ProfOn()) {
+            /* Begin before the raise: the gate wait inside it is the routine's. */
+            void *prev = xbox_ProfBegin(prof_kind, routine);
+            int _irql = xbox_IrqlEnterInterrupt(2);
+            long long t0 = xbox_ProfNowUs();
+            if (active) *active = 1;
+            fn();
+            if (active) *active = was;
+            xbox_ProfEnd(prev, xbox_ProfNowUs() - t0);
+            xbox_IrqlLeaveInterrupt(_irql);
+            return 1;
+        }
+        {
+            int _irql = xbox_IrqlEnterInterrupt(2);
+            if (active) *active = 1;
+            fn();
+            if (active) *active = was;
+            xbox_IrqlLeaveInterrupt(_irql);
+        }
     }
-    { int _irql = xbox_IrqlEnterInterrupt(2); fn(); xbox_IrqlLeaveInterrupt(_irql); }
     return 1;
 }
 
@@ -3586,19 +3691,25 @@ static int kernel_fire_timers(long long now, long long *next_due_ms)
         LeaveCriticalSection(&g_timer_lock);
         fired++;
 
-        /* Outside the lock: the routine can set or cancel timers. */
-        if (dpc)
-            kernel_run_dpc(dpc, 0, 0, XBOX_PROF_DPC_TIMER);
-
-        /* Wake anyone parked on the timer's shadow event; a timer with no
-         * DPC is just a kernel sleep. */
+        /* The timer is signalled first and its DPC runs after, as the
+         * kernel's expiry does (it signals, then queues the DPC): a DPC that
+         * looks at the timer, or wakes a thread that waits on it, finds it
+         * signalled. Wakes anyone parked on the timer's shadow event; a
+         * timer with no DPC is just a kernel sleep. */
         {
             HANDLE ev = ke_shadow_lookup(fired_va);
             if (ev) {
-                SetEvent(ev);
                 BRIDGE_MEM32(fired_va + 4) = 1;   /* SignalState */
+                SetEvent(ev);
             }
         }
+
+        /* Outside the lock: the routine can set or cancel timers. A
+         * one-shot timer's slot was cleared above under the lock, so a
+         * KeCancelTimer from here on returns FALSE: it expired, and its
+         * DPC runs, as on the console. */
+        if (dpc)
+            kernel_run_dpc(dpc, 0, 0, XBOX_PROF_DPC_TIMER);
     }
     return fired;
 }
@@ -3838,6 +3949,18 @@ static void kernel_set_timer(uint32_t timer_va, long long due_100ns,
         CloseHandle(CreateThread(NULL, 0, kernel_timer_thread, NULL, 0, NULL));
     }
 
+    /* A freshly set timer starts unsignaled, like the real KeSetTimer --
+     * its SignalState too, which a fire had left at 1 for good. Before it
+     * is armed: a timer due at once can fire before this call returns, and
+     * a reset after that would take the fire back. */
+    {
+        HANDLE ev = ke_shadow_lookup(timer_va);
+        if (ev) {
+            ResetEvent(ev);
+            BRIDGE_MEM32(timer_va + 4) = 0;
+        }
+    }
+
     EnterCriticalSection(&g_timer_lock);
     for (i = 0; i < XBOX_MAX_TIMERS; i++) {
         if (g_timers[i].timer_va == timer_va) { free_slot = i; was_set = 1; break; }
@@ -3851,12 +3974,6 @@ static void kernel_set_timer(uint32_t timer_va, long long due_100ns,
     }
     LeaveCriticalSection(&g_timer_lock);
 
-    /* A freshly set timer starts unsignaled, like the real KeSetTimer. */
-    {
-        HANDLE ev = ke_shadow_lookup(timer_va);
-        if (ev)
-            ResetEvent(ev);
-    }
     g_eax = was_set;
 }
 
@@ -5579,8 +5696,15 @@ static void bridge_KeCancelTimer(void)
 /* Both halves: the shadow object this runtime keeps, and the firing
      * table above, or a cancelled timer keeps calling its DPC. */
     uint32_t timer_va = STACK_ARG(0);
-    int armed = xbox_kernel_cancel_timer(timer_va);
-    g_eax = (uint32_t)xbox_KeCancelTimer(XBOX_TO_NATIVE(timer_va)) || armed;
+
+    /* Only the firing table: bridged timers never reach the host-layout
+     * timer code in kernel_sync.c. xbox_KeCancelTimer was also called on
+     * the guest KTIMER, but its XBOX_KTIMER is a host struct (three
+     * pointers, then Inserted at +24): over guest memory it read the
+     * header bytes as a timer-queue handle and TimerListEntry's first byte
+     * as Inserted, and with that byte non-zero it returned TRUE for a timer
+     * that was not armed and passed the header to DeleteTimerQueueTimer. */
+    g_eax = (uint32_t)xbox_kernel_cancel_timer(timer_va);
 }
 
 /* ── KeDisconnectInterrupt (ordinal 100, 1 arg) */
@@ -7564,6 +7688,34 @@ static void ke_shadow_init(void)
 
 /* Insert a mapping guest_va -> host HANDLE. Replaces any prior mapping for
  * the same guest_va (closing the old handle and inserting the new one). */
+/* A host handle replaced by a re-initialisation of its guest object
+ * (KeInitializeEvent or KeInitializeTimerEx again on the same address).
+ *
+ * It used to be closed there and then. A thread still waiting on it was
+ * then waiting on a closed handle: undefined on Windows, and on POSIX the
+ * compat layer frees the object's mutex and condition variable under the
+ * waiter (waits hold no reference). The console's re-init orphans such a
+ * waiter -- it waits on, unsignalled -- so the handle is kept open, and
+ * closed only once KE_RETIRED_MAX later ones have been retired after it. */
+#define KE_RETIRED_MAX 256
+static HANDLE s_ke_retired[KE_RETIRED_MAX];
+static uint32_t s_ke_retired_next, s_ke_retired_total;
+
+static void ke_shadow_retire(HANDLE old)    /* g_ke_shadow_cs held */
+{
+    HANDLE oldest = s_ke_retired[s_ke_retired_next];
+
+    s_ke_retired[s_ke_retired_next] = old;
+    s_ke_retired_next = (s_ke_retired_next + 1) % KE_RETIRED_MAX;
+    if (oldest)
+        CloseHandle(oldest);
+    if (++s_ke_retired_total == 1) {
+        fprintf(stderr, "  [KERNEL] a kernel object was initialised again while it"
+                        " had a host object; the old one stays open for its waiters\n");
+        fflush(stderr);
+    }
+}
+
 static void ke_shadow_insert(uint32_t guest_va, HANDLE host)
 {
     uint32_t i;
@@ -7579,7 +7731,7 @@ static void ke_shadow_insert(uint32_t guest_va, HANDLE host)
     for (i = 0; i < KE_SHADOW_SIZE; i++) {
         if (g_ke_shadow[i].in_use && g_ke_shadow[i].guest_va == guest_va) {
             if (g_ke_shadow[i].host_handle && g_ke_shadow[i].host_handle != host)
-                CloseHandle(g_ke_shadow[i].host_handle);
+                ke_shadow_retire(g_ke_shadow[i].host_handle);
             g_ke_shadow[i].host_handle = host;
             LeaveCriticalSection(&g_ke_shadow_cs);
             return;
@@ -8470,6 +8622,7 @@ static void bridge_KePulseEvent(void)
         h = XBOX_TO_NATIVE(guest_va);
     if (h)
         PulseEvent(h);
+    ke_event_mirror(guest_va, h, 0);    /* a pulse leaves it not signalled */
 
     g_eax = 0; /* previous state unknown */
 }
@@ -8528,6 +8681,7 @@ static void bridge_KeResetEvent(void)
         h = XBOX_TO_NATIVE(guest_va);
     if (h)
         ResetEvent(h);
+    ke_event_mirror(guest_va, h, 0);
 
     g_eax = 0;
 }
@@ -10916,8 +11070,8 @@ static void kernel_thunk_dispatch(void)
          * function is calling this" into "this call site is", which is the
          * difference between guessing and knowing when a title recurses. */
         fprintf(stderr,
-                "  [KERNEL] #%d: ordinal %u (slot %d) esp=0x%08X ret=0x%08X\n",
-                g_kernel_call_count, ordinal, slot, g_esp,
+                "  [KERNEL] #%llu: ordinal %u (slot %d) esp=0x%08X ret=0x%08X\n",
+                (unsigned long long)g_kernel_call_count, ordinal, slot, g_esp,
                 g_esp ? BRIDGE_MEM32(g_esp) : 0);
         fflush(stderr);
     }
@@ -10927,8 +11081,8 @@ static void kernel_thunk_dispatch(void)
         DWORD now = GetTickCount();
         if (last_summary_tick == 0) last_summary_tick = now;
         if (now - last_summary_tick >= 2000 && g_kernel_call_count > 200) {
-            fprintf(stderr, "  [KERNEL] summary: %d total calls, latest ordinal %u (slot %d) esp=0x%08X\n",
-                    g_kernel_call_count, ordinal, slot, g_esp);
+            fprintf(stderr, "  [KERNEL] summary: %llu total calls, latest ordinal %u (slot %d) esp=0x%08X\n",
+                    (unsigned long long)g_kernel_call_count, ordinal, slot, g_esp);
 #if !defined(_WIN32)
             /* guest_cpus=token (kernel_thread.c): how often the holder was
              * made to hand over, and how long a thread that should have run
@@ -11001,9 +11155,9 @@ static void kernel_thunk_dispatch(void)
             if (_watch_before != seen) {
                 seen = _watch_before;
                 fprintf(stderr, "  [KWATCH] 0x%08X = %08X before ordinal %u"
-                                " (call #%d)\n",
+                                " (call #%llu)\n",
                         g_kernel_watch_va, _watch_before, ordinal,
-                        g_kernel_call_count);
+                        (unsigned long long)g_kernel_call_count);
                 fflush(stderr);
             }
         }

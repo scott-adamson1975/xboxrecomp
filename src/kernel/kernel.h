@@ -627,6 +627,10 @@ void xbox_SetCrtLockTable(uint32_t table_va, uint32_t count);
 VOID    __stdcall xbox_RtlEnterCriticalSection(PRTL_CRITICAL_SECTION CriticalSection);
 VOID    __stdcall xbox_RtlLeaveCriticalSection(PRTL_CRITICAL_SECTION CriticalSection);
 VOID    __stdcall xbox_RtlInitializeCriticalSection(PRTL_CRITICAL_SECTION CriticalSection);
+/* Critical-section shadow slots in use; *freed_total (if given) is how many
+ * idle ones were freed so far to make room (kernel_rtl.c). */
+int     xbox_cs_table_stats(long* freed_total);
+#define XBOX_HAVE_CS_TABLE_STATS 1
 
 ULONG   __stdcall xbox_RtlNtStatusToDosError(NTSTATUS Status);
 
@@ -944,6 +948,9 @@ KIRQL   __stdcall xbox_KeRaiseIrqlToDpcLevel(void);
 
 VOID    __stdcall xbox_KeStallExecutionProcessor(ULONG MicroSeconds);
 LARGE_INTEGER __stdcall xbox_KeQueryPerformanceCounter(void);
+/* RECOMP_DEBUG=detseed=1 (kernel_hal.c): the guest's clocks from fixed values. */
+int xbox_DetSeed(void);
+uint32_t xbox_GuestTickCount(void);
 LARGE_INTEGER __stdcall xbox_KeQueryPerformanceFrequency(void);
 VOID    __stdcall xbox_KeQuerySystemTime(PLARGE_INTEGER CurrentTime);
 

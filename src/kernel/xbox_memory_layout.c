@@ -2034,7 +2034,7 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
          * millisecond unit, so the rate matches. */
         *(volatile uint32_t *)((uintptr_t)(XBOX_KERNEL_DATA_BASE + KDATA_TICK_COUNT)
                                + g_memory_offset) =
-            GetTickCount() + (uint32_t)(xbox_GuestSkewNs() / 1000000u);
+            xbox_GuestTickCount() + (uint32_t)(xbox_GuestSkewNs() / 1000000u);
 
         /* Sleep, don't yield. Sleep(0) is sched_yield on macOS and under
          * Wine, and it returns at once when a core is free, so this loop
@@ -2058,6 +2058,10 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
             volatile uint32_t *kr =
                 (volatile uint32_t *)((char *)regs + NV2A_KICK_REG);
             uint32_t put0 = *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_PUT);
+            /* BO-282.7: with the frame-time trace on, this wait's time split
+             * by whether a guest thread sat in xbox_SpinWait meanwhile. */
+            const int idle_split = xbox_FrametimeOn();
+            uint64_t idle_prev = t0;
             (void)put0;
             for (;;) {
                 uint32_t put = *(volatile uint32_t *)((char *)regs + NV2A_USER_DMA_PUT);
@@ -2072,6 +2076,14 @@ static DWORD WINAPI nv2a_ack_thread(LPVOID param)
                     *kr &= ~NV2A_KICK_BIT;
                     kick_cleared(now);
                     last_active = now;
+                }
+                /* BO-282.7: whose turn the wait is (the frame-time trace's
+                 * idle split; a few loads and an add). */
+                if (idle_split) {
+                    if (now > idle_prev)
+                        xbox_IdleSplitAdd(now - idle_prev, g_xbox_spin_waiters > 0,
+                                          g_xbox_spin_wait_va);
+                    idle_prev = now;
                 }
                 if (now - t0 >= 1000000ull)
                     break;
@@ -3187,12 +3199,14 @@ BOOL xbox_MemoryLayoutInit(const void *xbe_data, size_t xbe_size)
          * otherwise run to 0xE8000000 and hold 0x80000000 against it. */
         if (g_span_size > XBOX_CONTIG_BASE)
             g_span_size = XBOX_CONTIG_BASE;
-#if defined(__linux__)
+#if defined(__linux__) || defined(__APPLE__)
         {
             /* The whole 4 GB guest window, held as a placeholder that the
              * fixed views replace (win32_compat.c, xbox_compat_guest_window):
              * a Vulkan device made before this (a windowed native build) had
-             * mapped at base + 2 GB, where the contiguous window goes. */
+             * mapped at base + 2 GB, where the contiguous window goes; on
+             * macOS the Metal presenter's fullscreen 4K drawables once sat at
+             * base + 0xFD000000, where the NV2A aperture goes (BO-236). */
             extern void xbox_compat_guest_window(void *lo, size_t size);
             const size_t win = (size_t)1 << 32;
             g_span_base = VirtualAlloc(NULL, win, MEM_RESERVE, PAGE_NOACCESS);
@@ -4394,8 +4408,8 @@ uint32_t xbox_AllocThreadTib(void)
 {
     /* XBOX_VA is scoped to the loader; the same arithmetic, spelled here. */
     #define TIB_VA(va) ((void *)((uintptr_t)(va) + g_memory_offset))
-    const uint32_t tib_size = 0x40;
-    uint32_t tib, block, thread_data, total;
+    const uint32_t tib_size = XBOX_TIB_SIZE;
+    uint32_t tib, block, thread_data, total, obj;
 
     if (!g_tls_total)
         return 0;                    /* image has no TLS; nothing to copy */
@@ -4408,14 +4422,44 @@ uint32_t xbox_AllocThreadTib(void)
     thread_data = block + total;
 
     /* The TIB itself, copied so stack bounds and the fields the title filled
-     * in are inherited, then the two that must not be. */
-    memcpy(TIB_VA(tib), TIB_VA(XBOX_TIB_MAIN), tib_size);
+     * in are inherited, then the ones that must not be. Only the first 0x40
+     * bytes: the KPRCB fields past them -- DpcRoutineActive at fs:[0x58] --
+     * start at zero. At 0x40 bytes the TLS template began right there, and
+     * fs:[0x58] on every thread but the main one read template bytes: D3D
+     * and DirectSound branch on it. */
+    memset(TIB_VA(tib), 0, tib_size);
+    memcpy(TIB_VA(tib), TIB_VA(XBOX_TIB_MAIN), 0x40);
     memcpy(TIB_VA(block), TIB_VA(g_tls_template_va), total);
     memset(TIB_VA(thread_data), 0, g_tls_thread_size);
 
     *(uint32_t *)TIB_VA(tib + 0x00) = 0xFFFFFFFFu;   /* own SEH chain    */
     *(uint32_t *)TIB_VA(block)      = thread_data;   /* slot 0           */
     *(uint32_t *)TIB_VA(tib + 0x04) = block + total; /* fs:[4], see above*/
+    *(uint32_t *)TIB_VA(tib + 0x18) = tib;           /* NtTib.Self       */
+    /* KPCR.Irql: the new thread is at PASSIVE (g_current_irql starts at 0),
+     * not at whatever the main thread was raised to when this was copied;
+     * the byte is otherwise only written at this thread's first change. */
+    *(uint8_t  *)TIB_VA(tib + 0x24) = 0;
+
+    /* fs:[0x28] names the calling thread's own KTHREAD stand-in: a spawned
+     * guest thread's object, or a fresh one for a host thread that runs
+     * guest code (the timer/DPC thread, the APU frame thread, the OHCI
+     * thread). Copying the main thread's made every DPC and ISR "the main
+     * thread" to XAPI's GetCurrentThreadId ([fs:[0x28]+0x12C]) and to any
+     * owner check a title's own lock makes, and aliased the main thread's
+     * TLS through KTHREAD.TlsData ([fs:[0x28]+0x28]). TlsData is this
+     * thread's own block, the dword [fs:[4] + index*4] also reaches; a
+     * spawned thread's startup may move it (bridge_layout_tls). */
+    obj = xbox_ThreadObjectForTib();
+    if (obj) {
+        *(uint32_t *)TIB_VA(tib + 0x28) = obj;
+        if (!*(uint32_t *)TIB_VA(obj + 0x28))
+            *(uint32_t *)TIB_VA(obj + 0x28) = block;
+    } else {
+        fprintf(stderr, "  [KERNEL] no thread object for a new TIB: this"
+                        " thread shares the main thread's identity\n");
+        fflush(stderr);
+    }
 
     return tib;
     #undef TIB_VA

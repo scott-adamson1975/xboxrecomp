@@ -2201,8 +2201,11 @@ class FunctionTranslator:
         # cmpxchg belongs here too: it snapshots the compare it performed,
         # because eax may be replaced before the branch reads the result.
         # sahf snapshots the AH image it loads, for the same reason.
+        # cmpxchg8b and the locked read-modify-writes publish theirs the
+        # same way (the LOCK prefix is Instruction.locked, so "lock add" is
+        # "add" here and matches _RESULT_SNAPSHOT_SETTERS on its own).
         if any(insn.mnemonic in ("cmp", "test", "bsf", "bsr", "cmpxchg",
-                                 "lock cmpxchg", "inc", "dec", "sahf")
+                                 "cmpxchg8b", "inc", "dec", "sahf")
                or insn.mnemonic in _RESULT_SNAPSHOT_SETTERS
                for insn in instructions):
             lines.append("    uint32_t _fa = 0, _fb = 0;")
@@ -2395,6 +2398,8 @@ class FunctionTranslator:
                 bb.start == start, incoming)
             if self.spin_waits is not None:
                 stmts = self.spin_waits.consider(start, bb, stmts)
+            if self.lifter.mem_order is not None:
+                stmts = self.lifter.mem_order.fence_spin_exits(start, bb, stmts)
             # Constant-address device registers by call, not fault (BO-72;
             # mmio_lower.py). After spin-wait lowering, which matches the
             # statements as lifted.
@@ -2519,9 +2524,11 @@ class BatchTranslator:
                  output_dir=None, seh_prolog=None, seh_epilog=None,
                  trace_functions=None, force_returns=None,
                  coalesce_json_paths=None, protected_function_starts=None,
-                 icall_sites_json_path=None, spin_waits=None, patches=None):
+                 icall_sites_json_path=None, spin_waits=None, patches=None,
+                 mem_order=None):
         """spin_waits: a spin_waits.SpinWaitConfig (--spin-waits), or None.
-        patches: a patches.PatchConfig (--patches), or None."""
+        patches: a patches.PatchConfig (--patches), or None.
+        mem_order: a mem_order.MemOrderConfig (--mem-order), or None."""
         self.xbe_path = xbe_path
         # Starts of the seeds a run saw (--seeds, `"observed": true`): the
         # flag-fallback report names its sites in these functions.
@@ -2591,6 +2598,9 @@ class BatchTranslator:
         if patches is not None:
             from .patches import PatchReport
             self.translator.lifter.patches = PatchReport(patches)
+        if mem_order is not None:
+            from .mem_order import MemOrderReport
+            self.translator.lifter.mem_order = MemOrderReport(mem_order)
         self.translator.protected_function_starts = set(
             protected_function_starts or ())
         for explicit_helper in (seh_prolog, seh_epilog):
