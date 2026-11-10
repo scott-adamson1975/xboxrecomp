@@ -50,6 +50,8 @@ extern "C" {
 #define RECOMP_ENV_GAME_KEYS(X)
 #endif
 
+#include "recomp_env_ours.h"             /* the fork's keys: the racing wheel, SimHub */
+
 /* The opt-in enhancements layer (src/enhance/, XBOXRECOMP_ENHANCE=ON) adds
  * its config-tier keys by defining RECOMP_ENV_HAVE_ENHANCE_KEYS on this
  * target. They mirror keys of the enhancements file (enhance.toml) and win
@@ -492,6 +494,7 @@ extern "C" {
     X(VR_AA, CONFIG, "RECOMP_VR_AA", NULL, "VR: anti-aliasing in the headset, off, fxaa or smaa, instead of RECOMP_GFX_AA (default smaa)") \
     X(VR_SHARPEN, CONFIG, "RECOMP_VR_SHARPEN", NULL, "VR: sharpening strength 0..1 in the headset, instead of RECOMP_GFX_SHARPEN (default 0)") \
     X(VR_LOD_BIAS, CONFIG, "RECOMP_VR_LOD_BIAS", NULL, "VR: the texture LOD bias in the headset (0, auto, -0.5, -1, -1.5), instead of RECOMP_GFX_LOD_BIAS (default 0)") \
+    RECOMP_ENV_OURS_KEYS(X) \
     /* ── the enhancements layer's keys (RECOMP_ENV_ENHANCE_KEYS, below) ── */ \
     RECOMP_ENV_ENHANCE_KEYS(X) \
     /* ── the game's own keys (RECOMP_ENV_GAME_KEYS, below) ──────────────── */ \

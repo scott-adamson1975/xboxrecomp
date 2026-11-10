@@ -93,6 +93,10 @@ void xbox_InputSetBlocked(int on);
 void xbox_InputSetComboGuard(int on);
 int  xbox_InputBlocked(void);
 
+/* 1 while a host output (rumble, a wheel's force) must be silent: the overlay
+ * is open, the window is not in front, or the run is ending. Any thread. */
+int  xbox_InputOutputMuted(void);
+
 /* The host backend this build uses (xinput_device.c). */
 extern const xbox_input_backend xbox_input_host_backend;
 

@@ -323,9 +323,9 @@ static int s_activate, s_back, s_page_delta, s_reset;
  * Controls, the host's page (Mods) and System, last: LB from the first page
  * goes to System. The names are the RECOMP_OVERLAY_TEST dumps' "page" line,
  * which the scene scripts wait for. */
-enum { P_DISPLAY, P_GRAPHICS, P_GAME, P_AUDIO, P_CONTROLS, P_VR, P_HOST, P_SYSTEM, P_COUNT };
+enum { P_DISPLAY, P_GRAPHICS, P_GAME, P_AUDIO, P_CONTROLS, P_WHEEL, P_WHEELTEST, P_SIMHUB, P_VR, P_HOST, P_SYSTEM, P_COUNT };
 static const char *k_page_name[P_COUNT] = {
-    "Display", "Graphics", "Game", "Audio", "Controls", "VR", "Mods", "System"
+    "Display", "Graphics", "Game", "Audio", "Controls", "Wheel", "Wheel test", "SimHub", "VR", "Mods", "System"
 };
 static int s_page;
 static int s_sel[P_COUNT];
@@ -375,7 +375,7 @@ static volatile uint32_t s_presents;
 
 /* ── rows ──────────────────────────────────────────────────────────── */
 
-enum { FMT_PLAIN, FMT_PERCENT, FMT_PERCENT_OF_MAX, FMT_TIMES, FMT_GAIN, FMT_NITS, FMT_RAWPCT, FMT_MM };
+enum { FMT_PLAIN, FMT_PERCENT, FMT_PERCENT_OF_MAX, FMT_TIMES, FMT_GAIN, FMT_NITS, FMT_RAWPCT, FMT_RAWPCT1, FMT_DEG, FMT_MM, FMT_MPS, FMT_SIGNED };
 
 struct Meta {
     xs_id id;                         /* its own index: checked below */
@@ -506,6 +506,7 @@ static constexpr Meta k_meta[XS_COUNT] = {
     /* XS_ONLINE_MODE */ { XS_ONLINE_MODE, "Online play", "Internet: the game's Xbox Live menus play through the lobby server in the Server row below. Local network: this copy runs a lobby for the computers on your network. Off: as a console without a network cable. From the next start.", 1, FMT_PLAIN, n_online, 0 },
     /* XS_ONLINE_REACTIONS */ { XS_ONLINE_REACTIONS, "Quick reactions", "Shows the quick reactions (GG, LET'S GO! and the like) the other players send with the d-pad in the game lobby and on the results screen. Off hides them; the reactions are still sent.", 1, FMT_PLAIN, NULL, 0 },
     /* XS_GAME_LANGUAGE */      { XS_GAME_LANGUAGE, "Language", "The language of the game's text, speech and films, as an Xbox set to that language would show them. Only the languages on your disc are offered.", 1, FMT_PLAIN, n_language, 0 },
+#include "overlay_ours_meta.inc"   /* the fork's labels and hints: wheel, SimHub */
     /* XS_GRAPHICS_SOFTBODY */  { XS_GRAPHICS_SOFTBODY, "Soft-body damage", "Cars crumple, tear and bend where they are hit, with the game's own sparks and debris where metal rips, instead of only losing panels. Drawn only: handling and the race are unchanged. Costs CPU in big pile-ups.", 1, FMT_PLAIN, NULL, 0 },
 #include "overlay_vr_meta.inc"        /* the VR settings: labels and hints */
 #if defined(__ANDROID__)
@@ -536,7 +537,8 @@ extern "C" const char *nvk_core_describe(void);   /* nv2a_vk_core.c */
 #endif
 enum RowKind { R_SETTING, R_ACTION, R_INFO, R_SPEAKERS, R_FOLDER, R_KEY, R_HOST,
                R_HEADER,                       /* a section's title (BO-327): text only */
-               R_ADV };                        /* "Show advanced settings": the page's switch (BO-338) */
+               R_ADV,                        /* "Show advanced settings": the page's switch (BO-338) */
+               R_BIND, R_LIVE };              /* the Wheel pages' (overlay_wheel.inc): a binding to press now, a live value */
 enum Action { A_NONE,                                               /* 0 is "no question asked" (s_confirm) */
               A_RESET_PAGE, A_RESET_ALL, A_REPORT, A_REPORT_SHOT,
               A_HOST0, A_HOST1, A_HOST2, A_HOST3,                  /* xbox_OverlaySetHostRows */
@@ -1322,6 +1324,21 @@ struct Row {
     bool adv = false;                 /* an advanced row: only with "Show advanced settings" on (BO-338) */
 };
 
+#include "overlay_wheel.h"           /* the Wheel and Wheel test pages (overlay_wheel.inc) */
+
+static bool page_shown(int p) { return p != P_WHEELTEST || wheel_page_shown(p); }
+/* The next page in a direction that is shown. */
+static int page_step(int from, int dir)
+{
+    int p = from;
+    for (int i = 0; i < P_COUNT; i++) {
+        p = (p + dir + P_COUNT) % P_COUNT;
+        if (page_shown(p))
+            return p;
+    }
+    return from;
+}
+#include "overlay_simhub.h"          /* the SimHub page (overlay_simhub.inc) */
 #include "overlay_vr.h"               /* the VR page (overlay_vr.inc) */
 
 /* The System page's three lines on what reaches the glass (below, with
@@ -1679,6 +1696,13 @@ static int page_rows(int page, Row *r)
             ACT(A_KEYS_PAGE, "Keyboard keys...");
         ACT(A_RESET_PAGE, "Reset this page to the defaults");
         break;
+    case P_WHEEL:
+    case P_WHEELTEST:
+        n = wheel_rows(page, r);                  /* overlay_wheel.inc */
+        break;
+    case P_SIMHUB:
+        n = simhub_rows(page, r);                 /* overlay_simhub.inc */
+        break;
     case P_VR:
         n = vr_rows(page, r);                     /* overlay_vr.inc */
         break;
@@ -1968,7 +1992,7 @@ static const char *host_tag_word(const xbox_overlay_hostrow &hr)
 static void test_state(const char *path)
 {
     static const char *const kinds[] = { "setting", "action", "info", "speakers", "folder", "key", "host", "header",
-                                         "advanced" };
+                                         "advanced", "bind", "live" };
     static const char *const bkinds[] = { "use", "off", "up", "place", "dir" };
     Row r[OVERLAY_ROWS];
     int n = page_rows(s_page, r);
@@ -2156,7 +2180,11 @@ static void value_text(xs_id id, char *out, size_t n)
         case FMT_PERCENT_OF_MAX: snprintf(out, n, "%d%%", (int)floor(v / s->max * 100.0 + 0.5)); break;
         case FMT_TIMES:          snprintf(out, n, "%dx", (int)v); break;
         case FMT_RAWPCT:         snprintf(out, n, "%d%%", (int)floor(v + 0.5)); break;      /* a value already in percent */
+        case FMT_RAWPCT1:        snprintf(out, n, "%.1f%%", v); break;
         case FMT_MM:             snprintf(out, n, "%d mm", (int)floor(v + 0.5)); break;
+        case FMT_DEG:            snprintf(out, n, "%d degrees", (int)floor(v + 0.5)); break;
+        case FMT_MPS:            if (v <= 0.0) snprintf(out, n, "Off"); else snprintf(out, n, "%d m/s", (int)floor(v + 0.5)); break;
+        case FMT_SIGNED:         snprintf(out, n, v > 0.0 ? "+%d" : "%d", (int)floor(v + (v < 0 ? -0.5 : 0.5))); break;
         case FMT_NITS:
             {
                 /* BO-244: nits on every platform (macOS outputs HDR10 too). */
@@ -2443,6 +2471,12 @@ static void activate_row(const Row &r)
 {
     if (s_confirm && !(r.kind == R_ACTION && r.action == s_confirm))
         s_confirm = 0;
+    if (r.kind == R_BIND) {
+        wheel_bind_activate(r.action);        /* overlay_wheel.inc */
+        return;
+    }
+    if (r.kind == R_LIVE)
+        return;
     if (r.kind == R_KEY) {
         key_row_activate(r);
         return;
@@ -2680,6 +2714,7 @@ static void set_open(bool on, bool from_title = false)
         fprintf(stderr, LOGP "open: %s, its input is held\n",
                 s_online_runs ? "online, the title runs" : "the title is paused");
     } else {
+        wheel_close();                    /* the Wheel pages' joystick handles (overlay_wheel.inc) */
         /* A build beside a running title would cost it frames: it stops
          * with the overlay, and goes on from there the next time. */
         if (s_sb && sb_state(NULL, NULL, 0) == XBOX_SHADERS_RUNNING) {
@@ -3147,6 +3182,8 @@ void xbox_OverlayPoll(void)
         } else if (s_open && s_confirm) {
             s_confirm = 0;                /* B takes back a Restart / Quit question */
             menusnd_play(XBOX_OVERLAY_SND_BACK);
+        } else if (s_open && wheel_cancel_capture()) {
+            menusnd_play(XBOX_OVERLAY_SND_BACK);   /* a wheel binding that waited for a control */
         } else if (s_open && s_keys_page && s_page == P_CONTROLS) {
             s_keys_page = false;          /* B leaves the keyboard keys' sub-page for Controls */
             s_sub_reselect = A_KEYS_BACK;
@@ -4437,6 +4474,7 @@ static void gesture_scroll()
     ImGui::SetScrollY(ImGui::GetScrollY() - ImGui::GetIO().MouseDelta.y);
 }
 
+#include "overlay_ours.inc"       /* the fork's pages: wheel, SimHub */
 #include "overlay_vr.inc"              /* the VR page */
 
 /* One row. `fs` is the label's size, `rh` the pitch; the columns are the
@@ -4542,6 +4580,7 @@ static void draw_row(const Row &r, int idx, bool sel, float width, float rh, flo
             arrow_tri(dl, lx - fs * 0.9f, cy, ar, 1, col(T->arrow));
         }
     }
+#include "overlay_wheel_row.inc"          /* the Wheel pages' rows: R_BIND and R_LIVE */
     if (r.kind == R_ADV) {
         /* The page's switch for its expert rows: a label and an On / Off box
          * as a setting's (BO-338). */
@@ -4979,7 +5018,7 @@ static void draw_header(ImDrawList *dl)
             ImGui::PushID(k + 100);
             ImGui::InvisibleButton("##pg", ImVec2(x1 - x0, sz * 1.2f));
             if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) {
-                s_page = (s_page + (k ? 1 : -1) + P_COUNT) % P_COUNT;
+                s_page = page_step(s_page, k ? 1 : -1);
                 menusnd_play(XBOX_OVERLAY_SND_PAGE);
                 rows_in_page();
                 s_scroll_to_sel = true;
@@ -5006,6 +5045,8 @@ static void draw_header(ImDrawList *dl)
         const float gap = LY.tab * 0.9f, cy = y0 + th * 0.5f;
         float x = LY.cx + 0.094f * LY.cw;
         for (int i = 0; i < P_COUNT; i++) {
+            if (!page_shown(i))
+                continue;
             const char *t = caps(k_page_name[i]);
             const float w = tw(LY.tab, t);
             ImGui::SetCursorScreenPos(ImVec2(x - gap * 0.5f, y0));
@@ -5198,6 +5239,8 @@ static bool row_hint(const Row &r, char *hint, size_t n)
 {
     bool locked_out = false;
     hint[0] = 0;
+    if (r.kind == R_BIND || r.kind == R_LIVE)
+        return wheel_hint(r, hint, n);        /* overlay_wheel.inc */
     if (r.kind == R_SETTING) {
         const xs_setting *s = xbox_SettingGet(r.id);
         locked_out = s->locked;
@@ -5504,6 +5547,8 @@ static void build_pages_inner()
 
     /* Steps from the pad and keys. */
     collect_steps();
+    wheel_frame();                        /* the Wheel pages: the joysticks, a binding waiting for a control */
+    wheel_swallow_input();
     auto move = [&](int dir) {
         for (int k = 0; k < n; k++) {
             sel = (sel + dir + n) % n;
@@ -5545,6 +5590,8 @@ static void build_pages_inner()
         if (rows[sel].kind == R_SETTING) {
             xbox_SettingReset(rows[sel].id);
             changed();
+        } else if (rows[sel].kind == R_BIND) {
+            wheel_bind_clear(rows[sel].action);
         } else if (rows[sel].kind == R_KEY && !keys_locked()) {
             xbox_InputKeyBind(rows[sel].action, s_key_slot[rows[sel].action], 0, NULL);
             keys_save();
@@ -5665,7 +5712,7 @@ static void build_pages_inner()
                 menusnd_play(XBOX_OVERLAY_SND_MOVE);
             }
         } else if (clicked && (rows[i].kind == R_ACTION || rows[i].kind == R_FOLDER || rows[i].kind == R_ADV
-                               || rows[i].kind == R_KEY || rows[i].kind == R_HOST)) {
+                               || rows[i].kind == R_KEY || rows[i].kind == R_HOST || rows[i].kind == R_BIND)) {
             sel = i;
             activate(rows[i]);
         } else if (clicked && rows[i].kind == R_SPEAKERS) {
@@ -5725,7 +5772,7 @@ static void build_pages_inner()
         s_rows_t0 = 0;
     /* A page change shows from the next frame. */
     if (s_page_delta) {
-        s_page = (s_page + (s_page_delta > 0 ? 1 : -1) + P_COUNT) % P_COUNT;
+        s_page = page_step(s_page, s_page_delta > 0 ? 1 : -1);
         s_page_delta = 0;
         menusnd_play(XBOX_OVERLAY_SND_PAGE);
         rows_in_page();
