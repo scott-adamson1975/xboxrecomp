@@ -237,6 +237,7 @@ static xs_setting s_set[XS_COUNT] = {
     [XS_AUDIO_CUSTOM_AT_START] = SETTING("audio.custom_music_at_start", XS_BOOL, 0, RENV_AUDIO_CUSTOM_AT_START, NULL, NULL, 0, 0, 1),
     /* Read by the kernel when the title asks, early in boot: a restart. */
     [XS_GAME_LANGUAGE]      = SETTING("game.language", XS_CHOICE, XS_RESTART, RENV_GAME_LANGUAGE, k_language, NULL, 0, 0, 0),
+#include "xbox_settings_ours_set.inc"   /* the fork's rows: wheel, SimHub */
 #if defined(__ANDROID__)
     [XS_INPUT_VIBRATION]    = SETTING("input.vibration", XS_CHOICE, XS_RESTART, RENV_ANDROID_VIBRATION, k_vibration, NULL, 0, 0, 0),
     /* The on-screen controls (touch_pad.h, BO-189). Live. */
@@ -291,6 +292,7 @@ static struct {
      * legacy without it is 0.2.x's (mostly the #42 workaround) and moves to
      * auto once where the display-link presenter is there. */
     { "display.present_timing_rev", RENV_PRESENT_TIMING_REV, "", 0, 0, 0 },
+#include "xbox_settings_ours_text.inc"   /* the fork's text settings: wheel bindings, SimHub address */
 };
 /* By its key, not a number: a text setting added above it moved the index
  * once (int030's input.keys) and the rev was written into the soundtrack. */
@@ -968,6 +970,7 @@ static int env_real(recomp_env_id id)
     const char *v = getenv(recomp_env_name(id));
     return v && *v;
 }
+
 
 void xbox_SettingsInit(const char *title)
 {

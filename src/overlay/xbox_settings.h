@@ -115,6 +115,7 @@ typedef enum {
     XS_ONLINE_MODE,          /* BO-134: off / internet / lan (xnet_hle.h); read at the start */
     XS_ONLINE_REACTIONS,     /* BO-352: show the quick reactions other players send, on by default; read at the start */
     XS_GAME_LANGUAGE,        /* the dashboard language the kernel reports (XC_LANGUAGE); a row only where the title has more than one */
+#include "xbox_settings_ours_ids.inc"   /* the fork's ids: wheel, SimHub */
     XS_GRAPHICS_SOFTBODY,    /* a title's soft-body vehicle damage (drawn only), off as shipped; read at start */
 #if defined(__ANDROID__)
     XS_INPUT_VIBRATION,      /* pad motors or the device's vibrator (android_vibration.c) */

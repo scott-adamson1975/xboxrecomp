@@ -50,6 +50,8 @@ extern "C" {
 #define RECOMP_ENV_GAME_KEYS(X)
 #endif
 
+#include "recomp_env_ours.h"             /* the fork's keys: the racing wheel, SimHub */
+
 /* The opt-in enhancements layer (src/enhance/, XBOXRECOMP_ENHANCE=ON) adds
  * its config-tier keys by defining RECOMP_ENV_HAVE_ENHANCE_KEYS on this
  * target. They mirror keys of the enhancements file (enhance.toml) and win
@@ -476,6 +478,7 @@ extern "C" {
     X(FLIP_COST_JITTER,  DEBUG, "flip_cost_jitter", NULL,                      "=us: flip_cost spread evenly by up to this either way (default 0)") \
     X(HR_SPIN,           DEBUG, "hr_spin",         NULL,                       "=0: BO-241: while frames are held to the host grid (graphics.high_refresh) the executor spins instead of napping when idle (waiting for the title's next kick, holding a frame for its edge), so the CPU keeps its clock up; =0 naps as before (default on, with the grid only)") \
     X(PUMP_STALL_AFTER,  DEBUG, "pump_stall_after", NULL,                      "=s: seconds after the first frame before pump_stall starts (default 0)") \
+    RECOMP_ENV_OURS_KEYS(X) \
     /* ── the enhancements layer's keys (RECOMP_ENV_ENHANCE_KEYS, below) ── */ \
     RECOMP_ENV_ENHANCE_KEYS(X) \
     /* ── the game's own keys (RECOMP_ENV_GAME_KEYS, below) ──────────────── */ \

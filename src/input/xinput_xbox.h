@@ -143,6 +143,9 @@ unsigned xbox_InputScriptedPads(void);
 /* The on-screen controls (touch_pad.h), port 0: held, or the device in use
  * (a finger since the last controller input). Xbox layout like the keys. */
 #define XBOX_INPUT_SRC_TOUCH 4u
+/* A racing wheel or pedals (wheel_pad.h), port 0: steering off centre or a
+ * pedal down. Xbox layout like the keys. */
+#define XBOX_INPUT_SRC_WHEEL 8u
 unsigned xbox_InputSources(DWORD dwPort);
 
 #ifdef __cplusplus
